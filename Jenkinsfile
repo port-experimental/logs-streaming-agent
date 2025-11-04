@@ -1,5 +1,6 @@
 pipeline {
-  agent { docker { image 'node:20-alpine' } }
+  agent any
+  tools { nodejs 'Node20' }
   stages {
     stage('Checkout'){ steps { checkout scm } }
     stage('Install'){ steps { sh 'npm ci || npm i' } }
