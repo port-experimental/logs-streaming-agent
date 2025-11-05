@@ -427,6 +427,10 @@ This application uses the following Jenkins REST API endpoints:
 - Jenkins 2.0+ with REST API enabled
 - Valid Jenkins user account with job read permissions
 
+## Documentation
+
+- **[WEBHOOK-WORKFLOW.md](./WEBHOOK-WORKFLOW.md)** - Detailed webhook workflow, event sequence, and data capture documentation
+
 ## License
 
 ISC
