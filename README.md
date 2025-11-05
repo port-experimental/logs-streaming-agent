@@ -10,6 +10,8 @@ Capture and monitor logs from Jenkins pipeline builds in real-time using the Jen
 - **Build monitoring**: Wait for new builds and automatically capture logs
 - **Multiple commands**: Flexible CLI for different use cases
 - **Build status tracking**: Get build results, duration, and timestamps
+- **Webhook integration**: Automatic log capture via Jenkins webhooks (event-driven)
+- **Distinct file naming**: Webhook logs prefixed with `webhookstream-` for easy identification
 
 ## Setup
 
@@ -43,11 +45,23 @@ JENKINS_URL=http://your-jenkins-server:8080
 JENKINS_USERNAME=your-username
 JENKINS_API_TOKEN=your-api-token-here
 JENKINS_JOB_NAME=your-node-app
+WEBHOOK_PORT=3000
 ```
 
 **Note**: For jobs in folders, use format: `folder-name/job-name`
 
 ## Usage
+
+### Two Modes of Operation
+
+This application supports two modes:
+
+1. **Manual Mode**: Run CLI commands to capture logs on-demand
+2. **Webhook Mode**: Automatic log capture when Jenkins sends webhook notifications
+
+---
+
+## Manual Mode (CLI)
 
 ### Monitor latest build
 
@@ -94,6 +108,100 @@ node jenkins-log-capture.js wait
 ```
 
 This is useful for CI/CD workflows where you trigger a build and want to immediately capture its logs.
+
+---
+
+## Webhook Mode (Automatic)
+
+### Start the webhook server
+
+```bash
+npm run webhook:server
+```
+
+The server will start and display:
+
+```
+🚀 Jenkins Webhook Server Started
+==================================================
+📡 Listening on port 3000
+🔗 Webhook URL: http://localhost:3000/webhook
+💚 Health check: http://localhost:3000/health
+📊 Status: http://localhost:3000/status
+📋 All logs: http://localhost:3000/logs
+🔔 Webhook logs: http://localhost:3000/logs/webhook
+==================================================
+
+📝 Log file naming:
+   - Webhook: webhookstream-{job}-build-{number}-{timestamp}.log
+   - Manual:  {job}-build-{number}-{timestamp}.log
+
+⏳ Waiting for Jenkins webhooks...
+```
+
+### Configure Jenkins
+
+The `Jenkinsfile` is already configured to send webhooks. When a build completes, Jenkins will automatically:
+
+1. Send a POST request to `http://host.docker.internal:3000/webhook`
+2. Include build information (job name, build number, status, duration)
+3. Your webhook server receives it and automatically captures the logs
+
+**Note**: `host.docker.internal` allows Docker containers to reach your host machine.
+
+### Install HTTP Request Plugin (if needed)
+
+If Jenkins doesn't have the HTTP Request Plugin:
+
+1. Go to Jenkins → Manage Jenkins → Manage Plugins
+2. Search for "HTTP Request Plugin"
+3. Install and restart Jenkins
+
+### Webhook Endpoints
+
+Once the server is running:
+
+**Health check:**
+```bash
+curl http://localhost:3000/health
+```
+
+**View active monitors:**
+```bash
+curl http://localhost:3000/status
+```
+
+**List all logs (webhook + manual):**
+```bash
+curl http://localhost:3000/logs
+```
+
+**List only webhook-captured logs:**
+```bash
+curl http://localhost:3000/logs/webhook
+```
+
+**Download a specific log:**
+```bash
+curl http://localhost:3000/logs/webhookstream-testJfrogPipeline-build-47-1699219234567.log
+```
+
+### File Naming Convention
+
+Logs are saved with different prefixes to easily distinguish their source:
+
+- **Webhook logs**: `webhookstream-{job}-build-{number}-{timestamp}.log`
+- **Manual logs**: `{job}-build-{number}-{timestamp}.log`
+
+Example:
+```
+logs/
+├── webhookstream-testJfrogPipeline-build-10-1699219234567.log  ← From webhook
+├── webhookstream-testJfrogPipeline-build-11-1699219456789.log  ← From webhook
+└── testJfrogPipeline-build-9-1699218123456.log                 ← Manual capture
+```
+
+---
 
 ## How It Works
 
