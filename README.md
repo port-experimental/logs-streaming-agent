@@ -1,9 +1,12 @@
-# Jenkins Log Capture Application
+# Jenkins & Port Integration POC
 
-Capture and monitor logs from Jenkins pipeline builds in real-time using the Jenkins REST API.
+This repository contains POC implementations for:
+1. **Jenkins Log Capture** - Real-time log streaming from Jenkins builds
+2. **Port Kafka Self-Service Actions** - Consume and process Port actions via Kafka
 
 ## Features
 
+### Jenkins Log Capture
 - **Real-time log streaming**: Monitor builds as they run with progressive text API
 - **Post-build log retrieval**: Fetch complete logs from completed builds
 - **Automatic log saving**: Save logs to files with timestamps
@@ -13,7 +16,40 @@ Capture and monitor logs from Jenkins pipeline builds in real-time using the Jen
 - **Webhook integration**: Automatic log capture via Jenkins webhooks (event-driven)
 - **Distinct file naming**: Webhook logs prefixed with `webhookstream-` for easy identification
 
-## Setup
+### Port Kafka Self-Service Actions
+- **Kafka consumer**: Connect to Port's managed Kafka topics
+- **Action routing**: Route actions to specific handlers based on identifier
+- **Status updates**: Report progress back to Port in real-time
+- **Log streaming**: Add log entries visible in Port UI
+- **Entity linking**: Create/update entities linked to action runs
+- **Error handling**: Graceful error handling with failure reporting
+- **Example handlers**: Pre-built handlers for common actions (deploy, scaffold, scale, etc.)
+
+## Quick Start
+
+### Jenkins Log Capture
+
+See the [Jenkins sections below](#jenkins-log-capture-setup) for detailed setup.
+
+### Port Kafka Integration
+
+```bash
+# Install dependencies
+npm install
+
+# Configure Port credentials
+cp .env.kafka.example .env
+# Edit .env with your Port and Kafka credentials
+
+# Run the consumer
+npm run kafka:consumer
+```
+
+See **[KAFKA-QUICKSTART.md](./KAFKA-QUICKSTART.md)** for complete setup guide.
+
+---
+
+## Jenkins Log Capture Setup
 
 ### 1. Install dependencies
 
@@ -429,7 +465,13 @@ This application uses the following Jenkins REST API endpoints:
 
 ## Documentation
 
+### Jenkins Integration
 - **[WEBHOOK-WORKFLOW.md](./WEBHOOK-WORKFLOW.md)** - Detailed webhook workflow, event sequence, and data capture documentation
+
+### Port Kafka Integration
+- **[KAFKA-README.md](./KAFKA-README.md)** - Port Kafka SSA POC overview
+- **[KAFKA-QUICKSTART.md](./KAFKA-QUICKSTART.md)** - Get started in 5 minutes
+- **[PORT-KAFKA-POC.md](./PORT-KAFKA-POC.md)** - Complete POC documentation with architecture, workflows, and API details
 
 ## License
 
