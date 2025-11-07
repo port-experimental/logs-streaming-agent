@@ -184,9 +184,9 @@ class PortKafkaConsumer {
     `);
 
     try {
-      // Update status to indicate processing started
+      // Update status label to indicate processing started
+      // Note: Don't set status to IN_PROGRESS - it's already set automatically
       await this.updateActionRun(runId, {
-        status: 'IN_PROGRESS',
         statusLabel: 'Processing action...',
       });
 
