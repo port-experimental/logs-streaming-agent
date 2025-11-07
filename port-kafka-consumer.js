@@ -7,6 +7,7 @@
 
 const { Kafka } = require('kafkajs');
 const axios = require('axios');
+const JenkinsLogCapture = require('./jenkins-log-capture');
 require('dotenv').config();
 
 class PortKafkaConsumer {
@@ -24,6 +25,14 @@ class PortKafkaConsumer {
     this.portApiUrl = 'https://api.getport.io/v1';
     this.accessToken = null;
     this.tokenExpiry = null;
+
+    // Initialize Jenkins client
+    this.jenkinsCapture = new JenkinsLogCapture({
+      jenkinsUrl: config.jenkinsUrl || process.env.JENKINS_URL || 'http://localhost:8080',
+      username: config.jenkinsUsername || process.env.JENKINS_USERNAME,
+      apiToken: config.jenkinsApiToken || process.env.JENKINS_API_TOKEN,
+      jobName: config.jenkinsJobName || process.env.JENKINS_JOB_NAME || 'your-node-app',
+    });
 
     // Initialize Kafka client
     this.kafka = new Kafka({
@@ -277,40 +286,165 @@ class PortKafkaConsumer {
   }
 
   /**
-   * Example: Handle service deployment
+   * Trigger Jenkins build
+   * Note: Currently using non-parameterized build. To enable parameters,
+   * configure your Jenkinsfile with parameters block first.
+   */
+  async triggerJenkinsBuild(parameters = {}) {
+    const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
+    const jobName = this.jenkinsCapture.jobName;
+    const auth = {
+      username: this.jenkinsCapture.username,
+      password: this.jenkinsCapture.apiToken,
+    };
+
+    try {
+      console.log(`🔨 Triggering Jenkins build for job: ${jobName}`);
+    //   if (parameters && Object.keys(parameters).length > 0) {
+    //     console.log(`📋 Parameters (for reference):`, parameters);
+    //     console.log(`⚠️  Note: Parameters not passed to Jenkins (job not configured for parameters)`);
+    //   }
+      
+      // Trigger simple build (non-parameterized)
+      await axios.post(
+        `${jenkinsUrl}/job/${jobName}/build`,
+        null,
+        { auth }
+      );
+
+      // Wait for build to be queued
+      console.log('⏳ Waiting for build to be queued...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Get the latest build number
+      const latestBuild = await this.jenkinsCapture.getLatestBuildNumber();
+      
+      if (!latestBuild) {
+        throw new Error('No build number returned from Jenkins');
+      }
+      
+      console.log(`✅ Build #${latestBuild} triggered successfully`);
+      return latestBuild;
+    } catch (error) {
+      console.error('❌ Jenkins trigger error:', error.response?.data || error.message);
+      throw new Error(`Failed to trigger Jenkins build: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Handle service deployment with Jenkins integration
    */
   async handleDeployService(message) {
     const runId = message.context.runId;
     const props = message.properties;
     const entity = message.entity;
 
-    await this.addActionRunLog(runId, '🚀 Starting service deployment...');
+    await this.addActionRunLog(runId, '🚀 Starting service deployment via Jenkins...');
     
     const serviceName = props.serviceName || props.service_name || 'service';
     const version = props.version || '1.0.0';
     const environment = props.environment || 'dev';
+    const changeReason = props.changeReason || 'Deployment triggered via Port';
     
     await this.addActionRunLog(runId, `Deploying ${serviceName} v${version} to ${environment}...`);
-    
-    // Simulate deployment steps
-    await this.addActionRunLog(runId, 'Step 1/4: Building container image...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    await this.addActionRunLog(runId, 'Step 2/4: Pushing to registry...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    await this.addActionRunLog(runId, `Step 3/4: Deploying to ${environment} cluster...`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    await this.addActionRunLog(runId, 'Step 4/4: Running health checks...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await this.addActionRunLog(runId, `Reason: ${changeReason}`);
 
-    await this.updateActionRun(runId, {
-      link: [`https://example.com/deployments/${runId}`],
-      statusLabel: `Deployed to ${environment}`,
-    });
-    
-    await this.addActionRunLog(runId, `✅ Successfully deployed ${serviceName} v${version} to ${environment}!`);
+    try {
+      // Step 1: Trigger Jenkins build
+      await this.addActionRunLog(runId, '📡 Triggering Jenkins build...');
+      
+      const buildNumber = await this.triggerJenkinsBuild({
+        SERVICE_NAME: serviceName,
+        VERSION: version,
+        ENVIRONMENT: environment,
+        CHANGE_REASON: changeReason,
+        PORT_RUN_ID: runId,
+      });
+
+      const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
+      const jobName = this.jenkinsCapture.jobName;
+      const buildUrl = `${jenkinsUrl}/job/${jobName}/${buildNumber}`;
+
+      await this.addActionRunLog(runId, `✅ Jenkins build #${buildNumber} started`);
+      
+      // Step 2: Update Port with Jenkins link
+      await this.updateActionRun(runId, {
+        link: [buildUrl],
+        statusLabel: `Jenkins build #${buildNumber} in progress`,
+      });
+
+      // Step 3: Stream Jenkins logs to Port in real-time
+      await this.addActionRunLog(runId, '📋 Streaming Jenkins logs...');
+      await this.addActionRunLog(runId, '─'.repeat(80));
+
+      let logBuffer = '';
+      const CHUNK_SIZE = 500; // Send logs in chunks to avoid overwhelming Port API
+
+      await this.jenkinsCapture.streamLogs(buildNumber, async (logChunk) => {
+        logBuffer += logChunk;
+        
+        // Send logs in chunks to Port
+        if (logBuffer.length >= CHUNK_SIZE) {
+          await this.addActionRunLog(runId, logBuffer);
+          logBuffer = '';
+        }
+      });
+
+      // Send any remaining logs
+      if (logBuffer.length > 0) {
+        await this.addActionRunLog(runId, logBuffer);
+      }
+
+      await this.addActionRunLog(runId, '─'.repeat(80));
+
+      // Step 4: Get final build status
+      const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber);
+      const isSuccess = buildStatus.result === 'SUCCESS';
+      const duration = (buildStatus.duration / 1000).toFixed(2);
+
+      await this.updateActionRun(runId, {
+        statusLabel: `Build ${buildStatus.result} (${duration}s)`,
+      });
+
+      if (isSuccess) {
+        await this.addActionRunLog(
+          runId,
+          `✅ Successfully deployed ${serviceName} v${version} to ${environment}!\nBuild #${buildNumber} completed in ${duration}s`
+        );
+
+        // Step 5: Create entity in Port catalog
+        await this.addActionRunLog(runId, '📝 Creating build record in Port catalog...');
+        
+        const entityData = {
+          identifier: `build-${buildNumber}-${Date.now()}`,
+          title: `Build #${buildNumber} - ${serviceName} v${version} (${environment})`,
+          properties: {
+            buildStatus: buildStatus.result,
+            buildUrl: buildUrl,
+            timestamp: new Date(buildStatus.timestamp).toISOString(),
+            buildDuration: buildStatus.duration,
+          },
+        };
+
+        try {
+          await this.upsertEntity('jenkinsBuild', entityData, runId);
+          await this.addActionRunLog(runId, `✅ Build record created in catalog: ${entityData.identifier}`);
+        } catch (entityError) {
+          console.error('Failed to create entity:', entityError);
+          await this.addActionRunLog(runId, `⚠️  Warning: Could not create catalog entry: ${entityError.message}`);
+          // Don't fail the deployment if entity creation fails
+        }
+      } else {
+        throw new Error(`Jenkins build failed with status: ${buildStatus.result}`);
+      }
+
+    } catch (error) {
+      await this.addActionRunLog(
+        runId,
+        `❌ Deployment failed: ${error.message}`
+      );
+      throw error;
+    }
   }
 
   /**
