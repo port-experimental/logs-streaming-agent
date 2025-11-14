@@ -286,9 +286,7 @@ class PortKafkaConsumer {
   }
 
   /**
-   * Trigger Jenkins build
-   * Note: Currently using non-parameterized build. To enable parameters,
-   * configure your Jenkinsfile with parameters block first.
+   * Trigger Jenkins build with parameters
    */
   async triggerJenkinsBuild(parameters = {}) {
     const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
@@ -300,16 +298,25 @@ class PortKafkaConsumer {
 
     try {
       console.log(`🔨 Triggering Jenkins build for job: ${jobName}`);
-    //   if (parameters && Object.keys(parameters).length > 0) {
-    //     console.log(`📋 Parameters (for reference):`, parameters);
-    //     console.log(`⚠️  Note: Parameters not passed to Jenkins (job not configured for parameters)`);
-    //   }
       
-      // Trigger simple build (non-parameterized)
+      const hasParameters = parameters && Object.keys(parameters).length > 0;
+      
+      if (hasParameters) {
+        console.log(`📋 Build Parameters:`, parameters);
+      }
+      
+      // Use buildWithParameters endpoint if parameters exist, otherwise use build
+      const endpoint = hasParameters ? 'buildWithParameters' : 'build';
+      const url = `${jenkinsUrl}/job/${jobName}/${endpoint}`;
+      
+      // Trigger build with parameters as query string
       await axios.post(
-        `${jenkinsUrl}/job/${jobName}/build`,
+        url,
         null,
-        { auth }
+        { 
+          auth,
+          params: hasParameters ? parameters : undefined
+        }
       );
 
       // Wait for build to be queued
@@ -409,19 +416,19 @@ class PortKafkaConsumer {
       // Step 5: Create entity in Port catalog (for both success and failure)
       await this.addActionRunLog(runId, '📝 Creating build record in Port catalog...');
       
-      const entityData = {
-        identifier: `build-${buildNumber}-${Date.now()}`,
-        title: `Build #${buildNumber} - ${serviceName} v${version} (${environment})`,
-        properties: {
-          buildStatus: buildStatus.result,
-          buildUrl: buildUrl,
-          timestamp: new Date(buildStatus.timestamp).toISOString(),
-          buildDuration: buildStatus.duration,
-        },
-      };
+      // const entityData = {
+      //   identifier: `build-${buildNumber}-${Date.now()}`,
+      //   title: `Build #${buildNumber} - ${serviceName} v${version} (${environment})`,
+      //   properties: {
+      //     buildStatus: buildStatus.result,
+      //     buildUrl: buildUrl,
+      //     timestamp: new Date(buildStatus.timestamp).toISOString(),
+      //     buildDuration: buildStatus.duration,
+      //   },
+      // };
 
       try {
-        await this.upsertEntity('jenkinsBuild', entityData, runId);
+        // await this.upsertEntity('jenkinsBuild', entityData, runId);
         await this.addActionRunLog(runId, `✅ Build record created in catalog: ${entityData.identifier}`);
       } catch (entityError) {
         console.error('Failed to create entity:', entityError);
