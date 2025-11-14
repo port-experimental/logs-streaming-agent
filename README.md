@@ -457,6 +457,85 @@ This application uses the following Jenkins REST API endpoints:
 - `GET /job/{name}/{number}/consoleText` - Get complete console output
 - `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
 
+## Error Handling
+
+This application implements comprehensive error handling across all components to ensure reliability and resilience.
+
+### **Retry Logic**
+
+**Jenkins Log Capture:**
+- Automatic retry for transient failures (network timeouts, connection resets)
+- Configurable retry attempts (default: 3) with exponential backoff
+- Retries only for retryable errors (5xx responses, network errors)
+- Max consecutive error tracking for log streaming (stops after 5 consecutive failures)
+
+**Port API Calls:**
+- Token refresh on expiration
+- Error logging with context for all API failures
+- Graceful degradation when Port API is unavailable
+
+**Kafka Consumer:**
+- Built-in retry configuration for Kafka connections
+- Automatic reconnection on consumer crash (up to 5 attempts)
+- Exponential backoff for reconnection attempts
+- Connection state tracking
+
+### **Error Handlers**
+
+**Global Process Handlers:**
+- `uncaughtException` - Logs and gracefully shuts down
+- `unhandledRejection` - Logs and gracefully shuts down
+- `SIGTERM` / `SIGINT` - Graceful shutdown with cleanup
+
+**Webhook Server:**
+- Global Express error handler
+- 404 handler for unknown routes
+- Input validation for webhook payloads
+- Directory traversal protection for file access
+- Try-catch blocks around all file operations
+- Server error handling (port in use, etc.)
+
+**Kafka Consumer:**
+- Consumer crash detection and auto-reconnection
+- Network timeout handling
+- Message processing errors don't stop the consumer
+- Connection state monitoring
+
+**Jenkins Integration:**
+- HTTP timeout configuration (30s default)
+- Retry with exponential backoff
+- Stream error recovery
+- Build status validation
+
+### **Validation**
+
+**Configuration Validation:**
+- All required environment variables checked on startup
+- Kafka broker format validation (host:port)
+- Clear error messages with setup instructions
+- Fails fast with detailed error output
+
+**Input Validation:**
+- Webhook payload validation (required fields)
+- Filename validation (prevent directory traversal)
+- Build number validation
+- Parameter type checking
+
+### **Graceful Degradation**
+
+- Failed messages don't crash the consumer
+- Individual action failures are reported to Port
+- Log capture continues even if file save fails
+- Webhook processing is async (doesn't block response)
+
+### **Monitoring & Observability**
+
+- Structured logging with context
+- Error logs include stack traces
+- Connection state tracking
+- Health check endpoints
+- Active task monitoring
+
 ## Logging
 
 This application uses [Winston](https://github.com/winstonjs/winston) for structured logging with multiple transports.

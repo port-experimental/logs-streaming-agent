@@ -48,17 +48,86 @@ class PortKafkaConsumer {
         username: this.config.kafkaUsername,
         password: this.config.kafkaPassword,
       },
+      retry: {
+        initialRetryTime: 1000,
+        retries: 8,
+        maxRetryTime: 30000,
+        multiplier: 2,
+      },
+      connectionTimeout: 10000,
+      requestTimeout: 30000,
     });
 
     this.consumer = this.kafka.consumer({ 
       groupId: this.config.consumerGroupId,
       sessionTimeout: 30000,
       heartbeatInterval: 3000,
+      retry: {
+        retries: 5,
+      },
     });
+
+    // Setup Kafka error handlers
+    this.setupKafkaErrorHandlers();
 
     // Topic names
     this.actionsTopic = `${this.config.orgId}.runs`;
     this.changesTopic = `${this.config.orgId}.change.log`;
+    
+    // Track connection state
+    this.isConnected = false;
+    this.isShuttingDown = false;
+  }
+
+  /**
+   * Setup Kafka error handlers
+   */
+  setupKafkaErrorHandlers() {
+    // Consumer error events
+    this.consumer.on('consumer.crash', ({ error, groupId }) => {
+      logger.error(`Consumer crashed in group ${groupId}:`, error);
+      if (!this.isShuttingDown) {
+        logger.info('Attempting to reconnect...');
+        this.reconnect();
+      }
+    });
+
+    this.consumer.on('consumer.disconnect', () => {
+      logger.warn('Consumer disconnected');
+      this.isConnected = false;
+    });
+
+    this.consumer.on('consumer.connect', () => {
+      logger.info('Consumer connected');
+      this.isConnected = true;
+    });
+
+    this.consumer.on('consumer.network.request_timeout', ({ broker, clientId }) => {
+      logger.warn(`Network request timeout for broker ${broker}`);
+    });
+  }
+
+  /**
+   * Reconnect to Kafka after connection failure
+   */
+  async reconnect(retries = 5, delay = 5000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        logger.info(`Reconnection attempt ${attempt}/${retries}...`);
+        await this.consumer.disconnect();
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await this.start();
+        logger.info('Reconnection successful');
+        return;
+      } catch (error) {
+        logger.error(`Reconnection attempt ${attempt} failed:`, error.message);
+        if (attempt === retries) {
+          logger.error('Max reconnection attempts reached, exiting...');
+          process.exit(1);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay * attempt));
+      }
+    }
   }
 
   /**
@@ -507,6 +576,11 @@ class PortKafkaConsumer {
    * Start consuming messages from Kafka
    */
   async start() {
+    if (this.isShuttingDown) {
+      logger.warn('Consumer is shutting down, cannot start');
+      return;
+    }
+
     logger.info('\n' + '🚀 Port Kafka Consumer Starting'.padEnd(80, '='));
     logger.info('='.repeat(80));
     logger.info(`
@@ -522,6 +596,7 @@ class PortKafkaConsumer {
       // Connect to Kafka
       logger.info('🔌 Connecting to Kafka...');
       await this.consumer.connect();
+      this.isConnected = true;
       logger.info('✅ Connected to Kafka');
 
       // Subscribe to topics
@@ -555,12 +630,14 @@ class PortKafkaConsumer {
           } catch (error) {
             logger.error('❌ Error processing message:', error);
             logger.error('Message value:', message.value.toString());
+            // Don't throw - continue processing other messages
           }
         },
       });
 
     } catch (error) {
       logger.error('❌ Failed to start consumer:', error);
+      this.isConnected = false;
       throw error;
     }
   }
@@ -569,9 +646,19 @@ class PortKafkaConsumer {
    * Gracefully shutdown the consumer
    */
   async shutdown() {
+    this.isShuttingDown = true;
     logger.info('\n🛑 Shutting down consumer...');
-    await this.consumer.disconnect();
-    logger.info('✅ Consumer disconnected');
+    
+    try {
+      if (this.isConnected) {
+        await this.consumer.disconnect();
+        this.isConnected = false;
+      }
+      logger.info('✅ Consumer disconnected');
+    } catch (error) {
+      logger.error('Error during shutdown:', error);
+      throw error;
+    }
   }
 }
 
@@ -581,12 +668,28 @@ if (require.main === module) {
 
   // Handle graceful shutdown
   const shutdown = async () => {
-    await consumer.shutdown();
-    process.exit(0);
+    try {
+      await consumer.shutdown();
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error during shutdown:', error);
+      process.exit(1);
+    }
   };
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception:', error);
+    shutdown();
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+    shutdown();
+  });
 
   // Start the consumer
   consumer.start().catch((error) => {
