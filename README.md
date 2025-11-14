@@ -457,6 +457,59 @@ This application uses the following Jenkins REST API endpoints:
 - `GET /job/{name}/{number}/consoleText` - Get complete console output
 - `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
 
+## Logging
+
+This application uses [Winston](https://github.com/winstonjs/winston) for structured logging with multiple transports.
+
+### Log Levels
+
+- `error` - Error messages (red)
+- `warn` - Warning messages (yellow)
+- `info` - Informational messages (green) - **default**
+- `http` - HTTP request logs (magenta)
+- `debug` - Detailed debug information (blue)
+
+### Log Outputs
+
+Logs are written to multiple destinations:
+
+1. **Console** - Colorized output with timestamps
+2. **logs/error.log** - JSON format, errors only
+3. **logs/combined.log** - JSON format, all log levels
+
+### Configuration
+
+Set the log level via environment variable:
+
+```bash
+# In .env file
+LOG_LEVEL=debug  # Options: error, warn, info, http, debug
+```
+
+Default level is `info` if not specified.
+
+### Log Files Location
+
+```
+logs/
+├── error.log       # Errors only (JSON)
+├── combined.log    # All logs (JSON)
+└── *.log          # Jenkins build logs
+```
+
+### Example Usage
+
+The logger is automatically used throughout the application:
+
+```javascript
+const logger = require('./logger');
+
+logger.info('Application started');
+logger.debug('Debug information', { metadata: 'value' });
+logger.warn('Warning message');
+logger.error('Error occurred', error);
+```
+
 ## Requirements
 
 - Node.js 14+ (for optional chaining support)
