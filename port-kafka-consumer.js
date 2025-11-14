@@ -413,28 +413,6 @@ class PortKafkaConsumer {
         statusLabel: `Build ${buildStatus.result} (${duration}s)`,
       });
 
-      // Step 5: Create entity in Port catalog (for both success and failure)
-      await this.addActionRunLog(runId, '📝 Creating build record in Port catalog...');
-      
-      // const entityData = {
-      //   identifier: `build-${buildNumber}-${Date.now()}`,
-      //   title: `Build #${buildNumber} - ${serviceName} v${version} (${environment})`,
-      //   properties: {
-      //     buildStatus: buildStatus.result,
-      //     buildUrl: buildUrl,
-      //     timestamp: new Date(buildStatus.timestamp).toISOString(),
-      //     buildDuration: buildStatus.duration,
-      //   },
-      // };
-
-      try {
-        // await this.upsertEntity('jenkinsBuild', entityData, runId);
-        await this.addActionRunLog(runId, `✅ Build record created in catalog: ${entityData.identifier}`);
-      } catch (entityError) {
-        console.error('Failed to create entity:', entityError);
-        await this.addActionRunLog(runId, `⚠️  Warning: Could not create catalog entry: ${entityError.message}`);
-        // Don't fail the deployment if entity creation fails
-      }
 
       if (isSuccess) {
         await this.addActionRunLog(
