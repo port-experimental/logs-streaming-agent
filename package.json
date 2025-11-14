@@ -8,8 +8,7 @@
     "capture:latest": "node jenkins-log-capture.js latest",
     "capture:wait": "node jenkins-log-capture.js wait",
     "webhook:server": "node webhook-server.js",
-    "kafka:consumer": "node port-kafka-consumer.js",
-    "kafka:example": "node examples/port-action-example.js"
+    "kafka:consumer": "node port-kafka-consumer.js"
   },
   "keywords": [],
   "author": "",
