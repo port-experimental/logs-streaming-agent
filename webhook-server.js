@@ -3,6 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const JenkinsLogCapture = require('./jenkins-log-capture');
+const logger = require('./logger');
 
 /**
  * Jenkins Webhook Server
@@ -30,46 +31,68 @@ const jenkinsCapture = new JenkinsLogCapture({
 async function saveWebhookLogs(buildNumber, logs) {
   const outputDir = './logs';
   
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+  try {
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
 
-  const filename = path.join(
-    outputDir,
-    `webhookstream-${jenkinsCapture.jobName}-build-${buildNumber}-${Date.now()}.log`
-  );
-  
-  fs.writeFileSync(filename, logs, 'utf8');
-  console.log(`Logs saved to: ${filename}`);
-  return filename;
+    const filename = path.join(
+      outputDir,
+      `webhookstream-${jenkinsCapture.jobName}-build-${buildNumber}-${Date.now()}.log`
+    );
+    
+    fs.writeFileSync(filename, logs, 'utf8');
+    logger.info(`Logs saved to: ${filename}`);
+    return filename;
+  } catch (error) {
+    logger.error(`Failed to save logs for build #${buildNumber}:`, error.message);
+    throw error;
+  }
 }
 
 /**
  * Main webhook endpoint - receives notifications from Jenkins
  */
 app.post('/webhook', async (req, res) => {
-  const notification = req.body;
-  
-  console.log('\n=== Jenkins Webhook Received ===');
-  console.log(`Job: ${notification.jobName}`);
-  console.log(`Build: #${notification.buildNumber}`);
-  console.log(`Status: ${notification.status}`);
-  console.log(`URL: ${notification.buildUrl}`);
-  console.log(`Timestamp: ${new Date(notification.timestamp).toISOString()}`);
-  
-  // Acknowledge receipt immediately
-  res.status(200).json({
-    received: true,
-    message: 'Webhook received successfully',
-    buildNumber: notification.buildNumber,
-    timestamp: new Date().toISOString()
-  });
-
-  // Process webhook asynchronously
   try {
-    await handleWebhook(notification);
+    const notification = req.body;
+    
+    // Validate required fields
+    if (!notification || !notification.buildNumber || !notification.jobName) {
+      logger.warn('Invalid webhook payload received:', notification);
+      return res.status(400).json({
+        error: 'Invalid payload',
+        message: 'Missing required fields: buildNumber, jobName'
+      });
+    }
+    
+    logger.info('\n=== Jenkins Webhook Received ===');
+    logger.info(`Job: ${notification.jobName}`);
+    logger.info(`Build: #${notification.buildNumber}`);
+    logger.info(`Status: ${notification.status}`);
+    logger.info(`URL: ${notification.buildUrl}`);
+    logger.info(`Timestamp: ${new Date(notification.timestamp).toISOString()}`);
+    
+    // Acknowledge receipt immediately
+    res.status(200).json({
+      received: true,
+      message: 'Webhook received successfully',
+      buildNumber: notification.buildNumber,
+      timestamp: new Date().toISOString()
+    });
+
+    // Process webhook asynchronously
+    try {
+      await handleWebhook(notification);
+    } catch (error) {
+      logger.error(`Error handling webhook: ${error.message}`, error);
+    }
   } catch (error) {
-    console.error(`Error handling webhook: ${error.message}`);
+    logger.error('Webhook endpoint error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
   }
 });
 
@@ -82,7 +105,7 @@ async function handleWebhook(notification) {
 
   // If build is starting or in progress, start real-time monitoring
   if (status === 'STARTED' || status === null || status === 'IN_PROGRESS') {
-    console.log(`\n📊 Starting real-time log capture for build #${buildNumber}...`);
+    logger.info(`\n📊 Starting real-time log capture for build #${buildNumber}...`);
     
     if (!activeTasks.has(taskKey)) {
       activeTasks.set(taskKey, true);
@@ -98,33 +121,33 @@ async function handleWebhook(notification) {
 
         // Get final build status
         const buildStatus = await jenkinsCapture.getBuildStatus(buildNumber);
-        console.log('\n--- Build Status ---');
-        console.log(`Result: ${buildStatus.result}`);
-        console.log(`Duration: ${buildStatus.duration}ms`);
+        logger.info('\n--- Build Status ---');
+        logger.info(`Result: ${buildStatus.result}`);
+        logger.info(`Duration: ${buildStatus.duration}ms`);
 
         // Save with webhookstream prefix
         await saveWebhookLogs(buildNumber, allLogs);
         
-        console.log(`\n✅ Build #${buildNumber} completed: ${buildStatus.result}`);
+        logger.info(`\n✅ Build #${buildNumber} completed: ${buildStatus.result}`);
       } catch (error) {
-        console.error(`\n❌ Error monitoring build #${buildNumber}: ${error.message}`);
+        logger.error(`\n❌ Error monitoring build #${buildNumber}: ${error.message}`, error);
       } finally {
         activeTasks.delete(taskKey);
       }
     } else {
-      console.log(`⚠️  Build #${buildNumber} is already being monitored`);
+      logger.warn(`⚠️  Build #${buildNumber} is already being monitored`);
     }
   } 
   // If build is already completed, just fetch the logs
   else if (status === 'SUCCESS' || status === 'FAILURE' || status === 'UNSTABLE' || status === 'ABORTED') {
-    console.log(`\n📥 Fetching logs for completed build #${buildNumber}...`);
+    logger.info(`\n📥 Fetching logs for completed build #${buildNumber}...`);
     
     try {
       const logs = await jenkinsCapture.getConsoleOutput(buildNumber);
       await saveWebhookLogs(buildNumber, logs);
-      console.log(`✅ Logs saved for build #${buildNumber} (${status})`);
+      logger.info(`✅ Logs saved for build #${buildNumber} (${status})`);
     } catch (error) {
-      console.error(`❌ Error fetching logs: ${error.message}`);
+      logger.error(`❌ Error fetching logs: ${error.message}`, error);
     }
   }
 }
@@ -159,98 +182,165 @@ app.get('/status', (req, res) => {
  * List captured logs (all logs including webhookstream)
  */
 app.get('/logs', (req, res) => {
-  const logsDir = './logs';
-  
-  if (!fs.existsSync(logsDir)) {
-    return res.json({ logs: [], count: 0 });
+  try {
+    const logsDir = './logs';
+    
+    if (!fs.existsSync(logsDir)) {
+      return res.json({ logs: [], count: 0 });
+    }
+
+    const files = fs.readdirSync(logsDir)
+      .filter(file => file.endsWith('.log'))
+      .map(file => {
+        const stats = fs.statSync(path.join(logsDir, file));
+        return {
+          filename: file,
+          size: stats.size,
+          type: file.startsWith('webhookstream-') ? 'webhook' : 'manual',
+          created: stats.birthtime,
+          modified: stats.mtime
+        };
+      })
+      .sort((a, b) => b.created - a.created);
+
+    res.json({ 
+      logs: files, 
+      count: files.length,
+      webhookCount: files.filter(f => f.type === 'webhook').length,
+      manualCount: files.filter(f => f.type === 'manual').length
+    });
+  } catch (error) {
+    logger.error('Error listing logs:', error);
+    res.status(500).json({ error: 'Failed to list logs', message: error.message });
   }
-
-  const files = fs.readdirSync(logsDir)
-    .filter(file => file.endsWith('.log'))
-    .map(file => {
-      const stats = fs.statSync(path.join(logsDir, file));
-      return {
-        filename: file,
-        size: stats.size,
-        type: file.startsWith('webhookstream-') ? 'webhook' : 'manual',
-        created: stats.birthtime,
-        modified: stats.mtime
-      };
-    })
-    .sort((a, b) => b.created - a.created);
-
-  res.json({ 
-    logs: files, 
-    count: files.length,
-    webhookCount: files.filter(f => f.type === 'webhook').length,
-    manualCount: files.filter(f => f.type === 'manual').length
-  });
 });
 
 /**
  * List only webhook-captured logs
  */
 app.get('/logs/webhook', (req, res) => {
-  const logsDir = './logs';
-  
-  if (!fs.existsSync(logsDir)) {
-    return res.json({ logs: [], count: 0 });
+  try {
+    const logsDir = './logs';
+    
+    if (!fs.existsSync(logsDir)) {
+      return res.json({ logs: [], count: 0 });
+    }
+
+    const files = fs.readdirSync(logsDir)
+      .filter(file => file.startsWith('webhookstream-') && file.endsWith('.log'))
+      .map(file => {
+        const stats = fs.statSync(path.join(logsDir, file));
+        return {
+          filename: file,
+          size: stats.size,
+          created: stats.birthtime,
+          modified: stats.mtime
+        };
+      })
+      .sort((a, b) => b.created - a.created);
+
+    res.json({ logs: files, count: files.length });
+  } catch (error) {
+    logger.error('Error listing webhook logs:', error);
+    res.status(500).json({ error: 'Failed to list webhook logs', message: error.message });
   }
-
-  const files = fs.readdirSync(logsDir)
-    .filter(file => file.startsWith('webhookstream-') && file.endsWith('.log'))
-    .map(file => {
-      const stats = fs.statSync(path.join(logsDir, file));
-      return {
-        filename: file,
-        size: stats.size,
-        created: stats.birthtime,
-        modified: stats.mtime
-      };
-    })
-    .sort((a, b) => b.created - a.created);
-
-  res.json({ logs: files, count: files.length });
 });
 
 /**
  * Get specific log file
  */
 app.get('/logs/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filepath = path.join('./logs', filename);
+  try {
+    const filename = req.params.filename;
+    
+    // Validate filename to prevent directory traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+    
+    const filepath = path.join('./logs', filename);
 
-  if (!fs.existsSync(filepath)) {
-    return res.status(404).json({ error: 'Log file not found' });
+    if (!fs.existsSync(filepath)) {
+      return res.status(404).json({ error: 'Log file not found' });
+    }
+
+    res.sendFile(path.resolve(filepath));
+  } catch (error) {
+    logger.error(`Error retrieving log file ${req.params.filename}:`, error);
+    res.status(500).json({ error: 'Failed to retrieve log file', message: error.message });
   }
+});
 
-  res.sendFile(path.resolve(filepath));
+// Global error handlers
+app.use((err, req, res, next) => {
+  logger.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'production' ? 'An error occurred' : err.message
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found', path: req.path });
 });
 
 // Start server
 const PORT = process.env.WEBHOOK_PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log('\n🚀 Jenkins Webhook Server Started');
-  console.log('='.repeat(50));
-  console.log(`📡 Listening on port ${PORT}`);
-  console.log(`🔗 Webhook URL: http://localhost:${PORT}/webhook`);
-  console.log(`💚 Health check: http://localhost:${PORT}/health`);
-  console.log(`📊 Status: http://localhost:${PORT}/status`);
-  console.log(`📋 All logs: http://localhost:${PORT}/logs`);
-  console.log(`🔔 Webhook logs: http://localhost:${PORT}/logs/webhook`);
-  console.log('='.repeat(50));
-  console.log(`\n📝 Log file naming:`);
-  console.log(`   - Webhook: webhookstream-{job}-build-{number}-{timestamp}.log`);
-  console.log(`   - Manual:  {job}-build-{number}-{timestamp}.log`);
-  console.log('\n⏳ Waiting for Jenkins webhooks...\n');
+const server = app.listen(PORT, () => {
+  logger.info('\n🚀 Jenkins Webhook Server Started');
+  logger.info('='.repeat(50));
+  logger.info(`📡 Listening on port ${PORT}`);
+  logger.info(`🔗 Webhook URL: http://localhost:${PORT}/webhook`);
+  logger.info(`💚 Health check: http://localhost:${PORT}/health`);
+  logger.info(`📊 Status: http://localhost:${PORT}/status`);
+  logger.info(`📋 All logs: http://localhost:${PORT}/logs`);
+  logger.info(`🔔 Webhook logs: http://localhost:${PORT}/logs/webhook`);
+  logger.info('='.repeat(50));
+  logger.info(`\n📝 Log file naming:`);
+  logger.info(`   - Webhook: webhookstream-{job}-build-{number}-{timestamp}.log`);
+  logger.info(`   - Manual:  {job}-build-{number}-{timestamp}.log`);
+  logger.info('\n⏳ Waiting for Jenkins webhooks...\n');
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    logger.error(`Port ${PORT} is already in use`);
+  } else {
+    logger.error('Server error:', error);
+  }
+  process.exit(1);
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n\n👋 Shutting down webhook server...');
-  console.log(`Active monitors: ${activeTasks.size}`);
-  process.exit(0);
+  logger.info('\n\n👋 Shutting down webhook server...');
+  logger.info(`Active monitors: ${activeTasks.size}`);
+  server.close(() => {
+    logger.info('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  logger.info('\n\n👋 SIGTERM received, shutting down...');
+  server.close(() => {
+    logger.info('Server closed');
+    process.exit(0);
+  });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
 module.exports = app;

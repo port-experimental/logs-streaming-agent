@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
 
 /**
  * Jenkins Log Capture Application
@@ -13,6 +14,9 @@ class JenkinsLogCapture {
     this.username = config.username;
     this.apiToken = config.apiToken;
     this.jobName = config.jobName;
+    this.maxRetries = config.maxRetries || 3;
+    this.retryDelay = config.retryDelay || 1000;
+    this.timeout = config.timeout || 30000;
     
     // Create axios instance with authentication
     this.client = axios.create({
@@ -23,8 +27,34 @@ class JenkinsLogCapture {
       },
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: this.timeout
     });
+  }
+
+  /**
+   * Retry helper for transient failures
+   */
+  async retryOperation(operation, operationName, retries = this.maxRetries) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        const isLastAttempt = attempt === retries;
+        const isRetryable = error.code === 'ECONNRESET' || 
+                           error.code === 'ETIMEDOUT' || 
+                           error.code === 'ECONNREFUSED' ||
+                           (error.response && error.response.status >= 500);
+        
+        if (isLastAttempt || !isRetryable) {
+          throw error;
+        }
+        
+        const delay = this.retryDelay * attempt;
+        logger.warn(`${operationName} failed (attempt ${attempt}/${retries}), retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 
   /**
@@ -32,9 +62,12 @@ class JenkinsLogCapture {
    */
   async getLatestBuildNumber() {
     try {
-      const response = await this.client.get(`/job/${this.jobName}/api/json`);
-      return response.data.lastBuild?.number || null;
+      return await this.retryOperation(async () => {
+        const response = await this.client.get(`/job/${this.jobName}/api/json`);
+        return response.data.lastBuild?.number || null;
+      }, 'Get latest build number');
     } catch (error) {
+      logger.error(`Failed to get latest build: ${error.message}`);
       throw new Error(`Failed to get latest build: ${error.message}`);
     }
   }
@@ -44,17 +77,20 @@ class JenkinsLogCapture {
    */
   async getBuildStatus(buildNumber) {
     try {
-      const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/api/json`
-      );
-      return {
-        number: response.data.number,
-        result: response.data.result,
-        building: response.data.building,
-        duration: response.data.duration,
-        timestamp: response.data.timestamp
-      };
+      return await this.retryOperation(async () => {
+        const response = await this.client.get(
+          `/job/${this.jobName}/${buildNumber}/api/json`
+        );
+        return {
+          number: response.data.number,
+          result: response.data.result,
+          building: response.data.building,
+          duration: response.data.duration,
+          timestamp: response.data.timestamp
+        };
+      }, `Get build status for #${buildNumber}`);
     } catch (error) {
+      logger.error(`Failed to get build status for #${buildNumber}: ${error.message}`);
       throw new Error(`Failed to get build status: ${error.message}`);
     }
   }
@@ -66,8 +102,10 @@ class JenkinsLogCapture {
   async streamLogs(buildNumber, onLogChunk, pollInterval = 2000) {
     let start = 0;
     let isBuilding = true;
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 5;
 
-    console.log(`Starting log stream for build #${buildNumber}...`);
+    logger.info(`Starting log stream for build #${buildNumber}...`);
 
     while (isBuilding) {
       try {
@@ -93,17 +131,28 @@ class JenkinsLogCapture {
         // Check if build is still running
         isBuilding = moreData === 'true';
 
+        // Reset error counter on success
+        consecutiveErrors = 0;
+
         if (isBuilding) {
           // Wait before next poll
           await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
       } catch (error) {
-        console.error(`Error streaming logs: ${error.message}`);
-        break;
+        consecutiveErrors++;
+        logger.error(`Error streaming logs (attempt ${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`);
+        
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          logger.error(`Max consecutive errors reached, stopping log stream`);
+          throw new Error(`Failed to stream logs after ${maxConsecutiveErrors} attempts`);
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
       }
     }
 
-    console.log('Log stream completed.');
+    logger.info('Log stream completed.');
   }
 
   /**
@@ -112,12 +161,15 @@ class JenkinsLogCapture {
    */
   async getConsoleOutput(buildNumber) {
     try {
-      const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/consoleText`,
-        { responseType: 'text' }
-      );
-      return response.data;
+      return await this.retryOperation(async () => {
+        const response = await this.client.get(
+          `/job/${this.jobName}/${buildNumber}/consoleText`,
+          { responseType: 'text' }
+        );
+        return response.data;
+      }, `Get console output for #${buildNumber}`);
     } catch (error) {
+      logger.error(`Failed to get console output for #${buildNumber}: ${error.message}`);
       throw new Error(`Failed to get console output: ${error.message}`);
     }
   }
@@ -139,9 +191,10 @@ class JenkinsLogCapture {
       );
       
       fs.writeFileSync(filename, logs, 'utf8');
-      console.log(`Logs saved to: ${filename}`);
+      logger.info(`Logs saved to: ${filename}`);
       return filename;
     } catch (error) {
+      logger.error(`Failed to save logs for #${buildNumber}: ${error.message}`);
       throw new Error(`Failed to save logs: ${error.message}`);
     }
   }
@@ -152,34 +205,39 @@ class JenkinsLogCapture {
   async monitorBuild(buildNumber, saveToFile = true) {
     let allLogs = '';
 
-    // Stream logs in real-time
-    await this.streamLogs(buildNumber, (chunk) => {
-      process.stdout.write(chunk);
-      allLogs += chunk;
-    });
+    try {
+      // Stream logs in real-time
+      await this.streamLogs(buildNumber, (chunk) => {
+        process.stdout.write(chunk);
+        allLogs += chunk;
+      });
 
-    // Get final build status
-    const status = await this.getBuildStatus(buildNumber);
-    console.log('\n--- Build Status ---');
-    console.log(`Result: ${status.result}`);
-    console.log(`Duration: ${status.duration}ms`);
+      // Get final build status
+      const status = await this.getBuildStatus(buildNumber);
+      logger.info('\n--- Build Status ---');
+      logger.info(`Result: ${status.result}`);
+      logger.info(`Duration: ${status.duration}ms`);
 
-    // Save to file if requested
-    if (saveToFile) {
-      const outputDir = './logs';
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
+      // Save to file if requested
+      if (saveToFile) {
+        const outputDir = './logs';
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+        
+        const filename = path.join(
+          outputDir,
+          `${this.jobName}-build-${buildNumber}-${Date.now()}.log`
+        );
+        fs.writeFileSync(filename, allLogs, 'utf8');
+        logger.info(`Logs saved to: ${filename}`);
       }
-      
-      const filename = path.join(
-        outputDir,
-        `${this.jobName}-build-${buildNumber}-${Date.now()}.log`
-      );
-      fs.writeFileSync(filename, allLogs, 'utf8');
-      console.log(`Logs saved to: ${filename}`);
-    }
 
-    return { logs: allLogs, status };
+      return { logs: allLogs, status };
+    } catch (error) {
+      logger.error(`Failed to monitor build #${buildNumber}: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
@@ -187,17 +245,22 @@ class JenkinsLogCapture {
    */
   async waitForNewBuild(previousBuildNumber, timeout = 300000) {
     const startTime = Date.now();
-    console.log(`Waiting for new build (previous: #${previousBuildNumber})...`);
+    logger.info(`Waiting for new build (previous: #${previousBuildNumber})...`);
 
     while (Date.now() - startTime < timeout) {
-      const latestBuild = await this.getLatestBuildNumber();
-      
-      if (latestBuild && latestBuild > previousBuildNumber) {
-        console.log(`New build detected: #${latestBuild}`);
-        return latestBuild;
-      }
+      try {
+        const latestBuild = await this.getLatestBuildNumber();
+        
+        if (latestBuild && latestBuild > previousBuildNumber) {
+          logger.info(`New build detected: #${latestBuild}`);
+          return latestBuild;
+        }
 
-      await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      } catch (error) {
+        logger.warn(`Error checking for new build: ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
     }
 
     throw new Error('Timeout waiting for new build');
@@ -215,12 +278,12 @@ if (require.main === module) {
 
   // Validate configuration
   if (!config.username || !config.apiToken) {
-    console.error('Error: JENKINS_USERNAME and JENKINS_API_TOKEN must be set');
-    console.error('Create a .env file with:');
-    console.error('JENKINS_URL=http://your-jenkins-server:8080');
-    console.error('JENKINS_USERNAME=your-username');
-    console.error('JENKINS_API_TOKEN=your-api-token');
-    console.error('JENKINS_JOB_NAME=your-job-name');
+    logger.error('Error: JENKINS_USERNAME and JENKINS_API_TOKEN must be set');
+    logger.error('Create a .env file with:');
+    logger.error('JENKINS_URL=http://your-jenkins-server:8080');
+    logger.error('JENKINS_USERNAME=your-username');
+    logger.error('JENKINS_API_TOKEN=your-api-token');
+    logger.error('JENKINS_JOB_NAME=your-job-name');
     process.exit(1);
   }
 
@@ -237,10 +300,10 @@ if (require.main === module) {
           // Monitor the latest build
           const latestBuild = await capture.getLatestBuildNumber();
           if (latestBuild) {
-            console.log(`Monitoring latest build: #${latestBuild}`);
+            logger.info(`Monitoring latest build: #${latestBuild}`);
             await capture.monitorBuild(latestBuild);
           } else {
-            console.log('No builds found');
+            logger.info('No builds found');
           }
           break;
 
@@ -248,10 +311,10 @@ if (require.main === module) {
           // Monitor specific build number
           const buildNumber = parseInt(args[1], 10);
           if (!buildNumber) {
-            console.error('Usage: node jenkins-log-capture.js build <build-number>');
+            logger.error('Usage: node jenkins-log-capture.js build <build-number>');
             process.exit(1);
           }
-          console.log(`Monitoring build: #${buildNumber}`);
+          logger.info(`Monitoring build: #${buildNumber}`);
           await capture.monitorBuild(buildNumber);
           break;
 
@@ -259,10 +322,10 @@ if (require.main === module) {
           // Fetch logs for completed build
           const fetchBuildNumber = parseInt(args[1], 10);
           if (!fetchBuildNumber) {
-            console.error('Usage: node jenkins-log-capture.js fetch <build-number>');
+            logger.error('Usage: node jenkins-log-capture.js fetch <build-number>');
             process.exit(1);
           }
-          console.log(`Fetching logs for build: #${fetchBuildNumber}`);
+          logger.info(`Fetching logs for build: #${fetchBuildNumber}`);
           await capture.saveLogsToFile(fetchBuildNumber);
           break;
 
@@ -274,15 +337,15 @@ if (require.main === module) {
           break;
 
         default:
-          console.log('Usage:');
-          console.log('  node jenkins-log-capture.js latest          - Monitor latest build');
-          console.log('  node jenkins-log-capture.js build <number>  - Monitor specific build');
-          console.log('  node jenkins-log-capture.js fetch <number>  - Fetch logs for completed build');
-          console.log('  node jenkins-log-capture.js wait            - Wait for next build and monitor');
+          logger.info('Usage:');
+          logger.info('  node jenkins-log-capture.js latest          - Monitor latest build');
+          logger.info('  node jenkins-log-capture.js build <number>  - Monitor specific build');
+          logger.info('  node jenkins-log-capture.js fetch <number>  - Fetch logs for completed build');
+          logger.info('  node jenkins-log-capture.js wait            - Wait for next build and monitor');
           break;
       }
     } catch (error) {
-      console.error(`Error: ${error.message}`);
+      logger.error(`Error: ${error.message}`, error);
       process.exit(1);
     }
   })();

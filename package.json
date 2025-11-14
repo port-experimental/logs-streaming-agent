@@ -8,8 +8,7 @@
     "capture:latest": "node jenkins-log-capture.js latest",
     "capture:wait": "node jenkins-log-capture.js wait",
     "webhook:server": "node webhook-server.js",
-    "kafka:consumer": "node port-kafka-consumer.js",
-    "kafka:example": "node examples/port-action-example.js"
+    "kafka:consumer": "node port-kafka-consumer.js"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +18,7 @@
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "kafkajs": "^2.2.4"
+    "kafkajs": "^2.2.4",
+    "winston": "^3.18.3"
   }
 }

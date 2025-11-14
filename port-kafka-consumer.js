@@ -8,6 +8,7 @@
 const { Kafka } = require('kafkajs');
 const axios = require('axios');
 const JenkinsLogCapture = require('./jenkins-log-capture');
+const logger = require('./logger');
 require('dotenv').config();
 
 class PortKafkaConsumer {
@@ -21,6 +22,9 @@ class PortKafkaConsumer {
       kafkaPassword: config.kafkaPassword || process.env.KAFKA_PASSWORD,
       consumerGroupId: config.consumerGroupId || process.env.KAFKA_CONSUMER_GROUP_ID,
     };
+
+    // Validate required configuration
+    this.validateConfig();
 
     this.portApiUrl = 'https://api.getport.io/v1';
     this.accessToken = null;
@@ -44,17 +48,143 @@ class PortKafkaConsumer {
         username: this.config.kafkaUsername,
         password: this.config.kafkaPassword,
       },
+      retry: {
+        initialRetryTime: 1000,
+        retries: 8,
+        maxRetryTime: 30000,
+        multiplier: 2,
+      },
+      connectionTimeout: 10000,
+      requestTimeout: 30000,
     });
 
     this.consumer = this.kafka.consumer({ 
       groupId: this.config.consumerGroupId,
       sessionTimeout: 30000,
       heartbeatInterval: 3000,
+      retry: {
+        retries: 5,
+      },
     });
+
+    // Setup Kafka error handlers
+    this.setupKafkaErrorHandlers();
 
     // Topic names
     this.actionsTopic = `${this.config.orgId}.runs`;
     this.changesTopic = `${this.config.orgId}.change.log`;
+    
+    // Track connection state
+    this.isConnected = false;
+    this.isShuttingDown = false;
+  }
+
+  /**
+   * Setup Kafka error handlers
+   */
+  setupKafkaErrorHandlers() {
+    // Consumer error events
+    this.consumer.on('consumer.crash', ({ error, groupId }) => {
+      logger.error(`Consumer crashed in group ${groupId}:`, error);
+      if (!this.isShuttingDown) {
+        logger.info('Attempting to reconnect...');
+        this.reconnect();
+      }
+    });
+
+    this.consumer.on('consumer.disconnect', () => {
+      logger.warn('Consumer disconnected');
+      this.isConnected = false;
+    });
+
+    this.consumer.on('consumer.connect', () => {
+      logger.info('Consumer connected');
+      this.isConnected = true;
+    });
+
+    this.consumer.on('consumer.network.request_timeout', ({ broker, clientId }) => {
+      logger.warn(`Network request timeout for broker ${broker}`);
+    });
+  }
+
+  /**
+   * Reconnect to Kafka after connection failure
+   */
+  async reconnect(retries = 5, delay = 5000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        logger.info(`Reconnection attempt ${attempt}/${retries}...`);
+        await this.consumer.disconnect();
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await this.start();
+        logger.info('Reconnection successful');
+        return;
+      } catch (error) {
+        logger.error(`Reconnection attempt ${attempt} failed:`, error.message);
+        if (attempt === retries) {
+          logger.error('Max reconnection attempts reached, exiting...');
+          process.exit(1);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay * attempt));
+      }
+    }
+  }
+
+  /**
+   * Validate required configuration
+   */
+  validateConfig() {
+    const errors = [];
+
+    // Port API credentials
+    if (!this.config.portClientId) {
+      errors.push('PORT_CLIENT_ID is required (set via config or environment variable)');
+    }
+    if (!this.config.portClientSecret) {
+      errors.push('PORT_CLIENT_SECRET is required (set via config or environment variable)');
+    }
+    if (!this.config.orgId) {
+      errors.push('PORT_ORG_ID is required (set via config or environment variable)');
+    }
+
+    // Kafka configuration
+    if (!this.config.kafkaBrokers || this.config.kafkaBrokers.length === 0) {
+      errors.push('KAFKA_BROKERS is required (comma-separated list of broker addresses)');
+    } else {
+      // Validate broker format
+      const invalidBrokers = this.config.kafkaBrokers.filter(broker => {
+        return !broker || !broker.includes(':');
+      });
+      if (invalidBrokers.length > 0) {
+        errors.push(`Invalid Kafka broker format. Expected format: host:port. Invalid brokers: ${invalidBrokers.join(', ')}`);
+      }
+    }
+
+    if (!this.config.kafkaUsername) {
+      errors.push('KAFKA_USERNAME is required (set via config or environment variable)');
+    }
+    if (!this.config.kafkaPassword) {
+      errors.push('KAFKA_PASSWORD is required (set via config or environment variable)');
+    }
+    if (!this.config.consumerGroupId) {
+      errors.push('KAFKA_CONSUMER_GROUP_ID is required (set via config or environment variable)');
+    }
+
+    // Throw error if any validation failed
+    if (errors.length > 0) {
+      const errorMessage = [
+        '\n❌ Configuration Validation Failed:',
+        '='.repeat(80),
+        ...errors.map(err => `  • ${err}`),
+        '='.repeat(80),
+        '\nPlease check your .env file or configuration object.',
+        'See .env.kafka.example for reference.\n'
+      ].join('\n');
+      
+      throw new Error(errorMessage);
+    }
+
+    logger.info('✅ Configuration validation passed');
   }
 
   /**
@@ -66,7 +196,7 @@ class PortKafkaConsumer {
       return this.accessToken;
     }
 
-    console.log('🔑 Fetching new Port API access token...');
+    logger.info('🔑 Fetching new Port API access token...');
     
     try {
       const response = await axios.post(`${this.portApiUrl}/auth/access_token`, {
@@ -78,10 +208,10 @@ class PortKafkaConsumer {
       // Token typically expires in 1 hour, refresh 5 minutes before
       this.tokenExpiry = Date.now() + (55 * 60 * 1000);
       
-      console.log('✅ Access token obtained');
+      logger.info('✅ Access token obtained');
       return this.accessToken;
     } catch (error) {
-      console.error('❌ Failed to get access token:', error.response?.data || error.message);
+      logger.error('❌ Failed to get access token:', error.response?.data || error.message);
       throw error;
     }
   }
@@ -104,10 +234,10 @@ class PortKafkaConsumer {
         }
       );
 
-      console.log(`✅ Updated action run ${runId}:`, updates.status || 'IN_PROGRESS');
+      logger.info(`✅ Updated action run ${runId}:`, updates.status || 'IN_PROGRESS');
       return response.data;
     } catch (error) {
-      console.error(`❌ Failed to update action run ${runId}:`, error.response?.data || error.message);
+      logger.error(`❌ Failed to update action run ${runId}:`, error.response?.data || error.message);
       throw error;
     }
   }
@@ -134,10 +264,10 @@ class PortKafkaConsumer {
         }
       );
 
-      console.log(`📝 Added log to action run ${runId}`);
+      logger.debug(`📝 Added log to action run ${runId}`);
       return response.data;
     } catch (error) {
-      console.error(`❌ Failed to add log to action run ${runId}:`, error.response?.data || error.message);
+      logger.error(`❌ Failed to add log to action run ${runId}:`, error.response?.data || error.message);
       throw error;
     }
   }
@@ -163,10 +293,10 @@ class PortKafkaConsumer {
         }
       );
 
-      console.log(`✅ Created/Updated entity: ${entityData.identifier} in blueprint: ${blueprintId}`);
+      logger.info(`✅ Created/Updated entity: ${entityData.identifier} in blueprint: ${blueprintId}`);
       return response.data;
     } catch (error) {
-      console.error(`❌ Failed to upsert entity:`, error.response?.data || error.message);
+      logger.error(`❌ Failed to upsert entity:`, error.response?.data || error.message);
       throw error;
     }
   }
@@ -175,16 +305,16 @@ class PortKafkaConsumer {
    * Process action invocation message
    */
   async processActionMessage(message) {
-    console.log('\n' + '='.repeat(80));
-    console.log('📨 Processing Action Invocation');
-    console.log('='.repeat(80));
+    logger.info('\n' + '='.repeat(80));
+    logger.info('📨 Processing Action Invocation');
+    logger.info('='.repeat(80));
 
     const runId = message.context.runId;
     const action = message.action;
     const properties = message.properties;
     const entity = message.entity;
 
-    console.log(`
+    logger.info(`
         🔹 Run ID: ${runId}
         🔹 Action: ${action.identifier}
         🔹 User: ${message.context.by.email}
@@ -213,7 +343,7 @@ class PortKafkaConsumer {
       );
 
     } catch (error) {
-      console.error('❌ Error processing action:', error);
+      logger.error('❌ Error processing action:', error);
       
       // Report failure to Port
       await this.addActionRunLog(
@@ -234,8 +364,8 @@ class PortKafkaConsumer {
     const properties = message.properties;
     const runId = message.context.runId;
 
-    console.log('🔧 Executing action handler...');
-    console.log('📋 Action Properties:', JSON.stringify(properties, null, 2));
+    logger.info('🔧 Executing action handler...');
+    logger.debug('📋 Action Properties:', JSON.stringify(properties, null, 2));
 
     // Example: Handle different action types
     switch (action.identifier) {
@@ -249,8 +379,8 @@ class PortKafkaConsumer {
         break;
       
       default:
-        console.log(`⚠️  No specific handler for action: ${action.identifier}`);
-        console.log('📝 Using default handler (logging only)');
+        logger.warn(`⚠️  No specific handler for action: ${action.identifier}`);
+        logger.info('📝 Using default handler (logging only)');
         await this.addActionRunLog(runId, `Received action: ${action.identifier} with properties: ${JSON.stringify(properties)}`);
     }
   }
@@ -286,9 +416,7 @@ class PortKafkaConsumer {
   }
 
   /**
-   * Trigger Jenkins build
-   * Note: Currently using non-parameterized build. To enable parameters,
-   * configure your Jenkinsfile with parameters block first.
+   * Trigger Jenkins build with parameters
    */
   async triggerJenkinsBuild(parameters = {}) {
     const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
@@ -299,21 +427,30 @@ class PortKafkaConsumer {
     };
 
     try {
-      console.log(`🔨 Triggering Jenkins build for job: ${jobName}`);
-    //   if (parameters && Object.keys(parameters).length > 0) {
-    //     console.log(`📋 Parameters (for reference):`, parameters);
-    //     console.log(`⚠️  Note: Parameters not passed to Jenkins (job not configured for parameters)`);
-    //   }
+      logger.info(`🔨 Triggering Jenkins build for job: ${jobName}`);
       
-      // Trigger simple build (non-parameterized)
+      const hasParameters = parameters && Object.keys(parameters).length > 0;
+      
+      if (hasParameters) {
+        logger.debug(`📋 Build Parameters:`, parameters);
+      }
+      
+      // Use buildWithParameters endpoint if parameters exist, otherwise use build
+      const endpoint = hasParameters ? 'buildWithParameters' : 'build';
+      const url = `${jenkinsUrl}/job/${jobName}/${endpoint}`;
+      
+      // Trigger build with parameters as query string
       await axios.post(
-        `${jenkinsUrl}/job/${jobName}/build`,
+        url,
         null,
-        { auth }
+        { 
+          auth,
+          params: hasParameters ? parameters : undefined
+        }
       );
 
       // Wait for build to be queued
-      console.log('⏳ Waiting for build to be queued...');
+      logger.info('⏳ Waiting for build to be queued...');
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Get the latest build number
@@ -323,10 +460,10 @@ class PortKafkaConsumer {
         throw new Error('No build number returned from Jenkins');
       }
       
-      console.log(`✅ Build #${latestBuild} triggered successfully`);
+      logger.info(`✅ Build #${latestBuild} triggered successfully`);
       return latestBuild;
     } catch (error) {
-      console.error('❌ Jenkins trigger error:', error.response?.data || error.message);
+      logger.error('❌ Jenkins trigger error:', error.response?.data || error.message);
       throw new Error(`Failed to trigger Jenkins build: ${error.response?.data?.message || error.message}`);
     }
   }
@@ -406,28 +543,6 @@ class PortKafkaConsumer {
         statusLabel: `Build ${buildStatus.result} (${duration}s)`,
       });
 
-      // Step 5: Create entity in Port catalog (for both success and failure)
-      await this.addActionRunLog(runId, '📝 Creating build record in Port catalog...');
-      
-      const entityData = {
-        identifier: `build-${buildNumber}-${Date.now()}`,
-        title: `Build #${buildNumber} - ${serviceName} v${version} (${environment})`,
-        properties: {
-          buildStatus: buildStatus.result,
-          buildUrl: buildUrl,
-          timestamp: new Date(buildStatus.timestamp).toISOString(),
-          buildDuration: buildStatus.duration,
-        },
-      };
-
-      try {
-        await this.upsertEntity('jenkinsBuild', entityData, runId);
-        await this.addActionRunLog(runId, `✅ Build record created in catalog: ${entityData.identifier}`);
-      } catch (entityError) {
-        console.error('Failed to create entity:', entityError);
-        await this.addActionRunLog(runId, `⚠️  Warning: Could not create catalog entry: ${entityError.message}`);
-        // Don't fail the deployment if entity creation fails
-      }
 
       if (isSuccess) {
         await this.addActionRunLog(
@@ -451,19 +566,24 @@ class PortKafkaConsumer {
    * Process change log message
    */
   async processChangeMessage(message) {
-    console.log('\n' + '='.repeat(80));
-    console.log('📝 Processing Change Log');
-    console.log('='.repeat(80));
-    console.log(JSON.stringify(message, null, 2));
+    logger.info('\n' + '='.repeat(80));
+    logger.info('📝 Processing Change Log');
+    logger.info('='.repeat(80));
+    logger.debug(JSON.stringify(message, null, 2));
   }
 
   /**
    * Start consuming messages from Kafka
    */
   async start() {
-    console.log('\n' + '🚀 Port Kafka Consumer Starting'.padEnd(80, '='));
-    console.log('='.repeat(80));
-    console.log(`
+    if (this.isShuttingDown) {
+      logger.warn('Consumer is shutting down, cannot start');
+      return;
+    }
+
+    logger.info('\n' + '🚀 Port Kafka Consumer Starting'.padEnd(80, '='));
+    logger.info('='.repeat(80));
+    logger.info(`
 📊 Configuration:
    - Organization ID: ${this.config.orgId}
    - Actions Topic: ${this.actionsTopic}
@@ -474,24 +594,25 @@ class PortKafkaConsumer {
 
     try {
       // Connect to Kafka
-      console.log('🔌 Connecting to Kafka...');
+      logger.info('🔌 Connecting to Kafka...');
       await this.consumer.connect();
-      console.log('✅ Connected to Kafka');
+      this.isConnected = true;
+      logger.info('✅ Connected to Kafka');
 
       // Subscribe to topics
-      console.log(`📡 Subscribing to topic: ${this.actionsTopic}`);
+      logger.info(`📡 Subscribing to topic: ${this.actionsTopic}`);
       await this.consumer.subscribe({ 
         topic: this.actionsTopic,
         fromBeginning: false, // Only consume new messages
       });
-      console.log('✅ Subscribed to actions topic');
+      logger.info('✅ Subscribed to actions topic');
 
       // Optionally subscribe to changes topic
       // await this.consumer.subscribe({ topic: this.changesTopic });
 
-      console.log('\n' + '='.repeat(80));
-      console.log('✅ Consumer Ready - Waiting for messages...');
-      console.log('='.repeat(80) + '\n');
+      logger.info('\n' + '='.repeat(80));
+      logger.info('✅ Consumer Ready - Waiting for messages...');
+      logger.info('='.repeat(80) + '\n');
 
       // Start consuming
       await this.consumer.run({
@@ -507,14 +628,16 @@ class PortKafkaConsumer {
             }
 
           } catch (error) {
-            console.error('❌ Error processing message:', error);
-            console.error('Message value:', message.value.toString());
+            logger.error('❌ Error processing message:', error);
+            logger.error('Message value:', message.value.toString());
+            // Don't throw - continue processing other messages
           }
         },
       });
 
     } catch (error) {
-      console.error('❌ Failed to start consumer:', error);
+      logger.error('❌ Failed to start consumer:', error);
+      this.isConnected = false;
       throw error;
     }
   }
@@ -523,9 +646,19 @@ class PortKafkaConsumer {
    * Gracefully shutdown the consumer
    */
   async shutdown() {
-    console.log('\n🛑 Shutting down consumer...');
-    await this.consumer.disconnect();
-    console.log('✅ Consumer disconnected');
+    this.isShuttingDown = true;
+    logger.info('\n🛑 Shutting down consumer...');
+    
+    try {
+      if (this.isConnected) {
+        await this.consumer.disconnect();
+        this.isConnected = false;
+      }
+      logger.info('✅ Consumer disconnected');
+    } catch (error) {
+      logger.error('Error during shutdown:', error);
+      throw error;
+    }
   }
 }
 
@@ -535,16 +668,32 @@ if (require.main === module) {
 
   // Handle graceful shutdown
   const shutdown = async () => {
-    await consumer.shutdown();
-    process.exit(0);
+    try {
+      await consumer.shutdown();
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error during shutdown:', error);
+      process.exit(1);
+    }
   };
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception:', error);
+    shutdown();
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+    shutdown();
+  });
+
   // Start the consumer
   consumer.start().catch((error) => {
-    console.error('Fatal error:', error);
+    logger.error('Fatal error:', error);
     process.exit(1);
   });
 }

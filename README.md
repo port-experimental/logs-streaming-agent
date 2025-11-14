@@ -457,6 +457,138 @@ This application uses the following Jenkins REST API endpoints:
 - `GET /job/{name}/{number}/consoleText` - Get complete console output
 - `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
 
+## Error Handling
+
+This application implements comprehensive error handling across all components to ensure reliability and resilience.
+
+### **Retry Logic**
+
+**Jenkins Log Capture:**
+- Automatic retry for transient failures (network timeouts, connection resets)
+- Configurable retry attempts (default: 3) with exponential backoff
+- Retries only for retryable errors (5xx responses, network errors)
+- Max consecutive error tracking for log streaming (stops after 5 consecutive failures)
+
+**Port API Calls:**
+- Token refresh on expiration
+- Error logging with context for all API failures
+- Graceful degradation when Port API is unavailable
+
+**Kafka Consumer:**
+- Built-in retry configuration for Kafka connections
+- Automatic reconnection on consumer crash (up to 5 attempts)
+- Exponential backoff for reconnection attempts
+- Connection state tracking
+
+### **Error Handlers**
+
+**Global Process Handlers:**
+- `uncaughtException` - Logs and gracefully shuts down
+- `unhandledRejection` - Logs and gracefully shuts down
+- `SIGTERM` / `SIGINT` - Graceful shutdown with cleanup
+
+**Webhook Server:**
+- Global Express error handler
+- 404 handler for unknown routes
+- Input validation for webhook payloads
+- Directory traversal protection for file access
+- Try-catch blocks around all file operations
+- Server error handling (port in use, etc.)
+
+**Kafka Consumer:**
+- Consumer crash detection and auto-reconnection
+- Network timeout handling
+- Message processing errors don't stop the consumer
+- Connection state monitoring
+
+**Jenkins Integration:**
+- HTTP timeout configuration (30s default)
+- Retry with exponential backoff
+- Stream error recovery
+- Build status validation
+
+### **Validation**
+
+**Configuration Validation:**
+- All required environment variables checked on startup
+- Kafka broker format validation (host:port)
+- Clear error messages with setup instructions
+- Fails fast with detailed error output
+
+**Input Validation:**
+- Webhook payload validation (required fields)
+- Filename validation (prevent directory traversal)
+- Build number validation
+- Parameter type checking
+
+### **Graceful Degradation**
+
+- Failed messages don't crash the consumer
+- Individual action failures are reported to Port
+- Log capture continues even if file save fails
+- Webhook processing is async (doesn't block response)
+
+### **Monitoring & Observability**
+
+- Structured logging with context
+- Error logs include stack traces
+- Connection state tracking
+- Health check endpoints
+- Active task monitoring
+
+## Logging
+
+This application uses [Winston](https://github.com/winstonjs/winston) for structured logging with multiple transports.
+
+### Log Levels
+
+- `error` - Error messages (red)
+- `warn` - Warning messages (yellow)
+- `info` - Informational messages (green) - **default**
+- `http` - HTTP request logs (magenta)
+- `debug` - Detailed debug information (blue)
+
+### Log Outputs
+
+Logs are written to multiple destinations:
+
+1. **Console** - Colorized output with timestamps
+2. **logs/error.log** - JSON format, errors only
+3. **logs/combined.log** - JSON format, all log levels
+
+### Configuration
+
+Set the log level via environment variable:
+
+```bash
+# In .env file
+LOG_LEVEL=debug  # Options: error, warn, info, http, debug
+```
+
+Default level is `info` if not specified.
+
+### Log Files Location
+
+```
+logs/
+├── error.log       # Errors only (JSON)
+├── combined.log    # All logs (JSON)
+└── *.log          # Jenkins build logs
+```
+
+### Example Usage
+
+The logger is automatically used throughout the application:
+
+```javascript
+const logger = require('./logger');
+
+logger.info('Application started');
+logger.debug('Debug information', { metadata: 'value' });
+logger.warn('Warning message');
+logger.error('Error occurred', error);
+```
+
 ## Requirements
 
 - Node.js 14+ (for optional chaining support)
