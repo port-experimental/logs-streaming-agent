@@ -463,16 +463,26 @@ This application implements comprehensive error handling across all components t
 
 ### **Retry Logic**
 
-**Jenkins Log Capture:**
-- Automatic retry for transient failures (network timeouts, connection resets)
-- Configurable retry attempts (default: 3) with exponential backoff
-- Retries only for retryable errors (5xx responses, network errors)
-- Max consecutive error tracking for log streaming (stops after 5 consecutive failures)
+**Global Axios Retry (All HTTP Requests):**
+- Centralized retry configuration via `axios-config.js`
+- **3 automatic retries** with exponential backoff (1s, 2s, 4s)
+- Retries on:
+  - Network errors (ECONNRESET, ETIMEDOUT, ECONNREFUSED, ENOTFOUND)
+  - Server errors (5xx status codes)
+  - Idempotent request errors
+- Detailed logging of retry attempts with URL, method, and error details
+- Applied to **all** API calls:
+  - Port API (authentication, action runs, entity updates)
+  - Jenkins API (build status, log retrieval, build triggers)
 
 **Port API Calls:**
-- Token refresh on expiration
+- Token refresh on expiration (55-minute cache)
 - Error logging with context for all API failures
 - Graceful degradation when Port API is unavailable
+
+**Jenkins Log Streaming:**
+- Max consecutive error tracking (stops after 5 consecutive failures)
+- Prevents infinite loops during persistent connection issues
 
 **Kafka Consumer:**
 - Built-in retry configuration for Kafka connections
