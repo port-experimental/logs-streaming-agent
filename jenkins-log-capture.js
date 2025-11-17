@@ -1,5 +1,5 @@
 require('dotenv').config();
-const axios = require('axios');
+const axios = require('./axios-config');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
@@ -14,11 +14,10 @@ class JenkinsLogCapture {
     this.username = config.username;
     this.apiToken = config.apiToken;
     this.jobName = config.jobName;
-    this.maxRetries = config.maxRetries || 3;
-    this.retryDelay = config.retryDelay || 1000;
     this.timeout = config.timeout || 30000;
     
     // Create axios instance with authentication
+    // Retry logic is handled by axios-config globally
     this.client = axios.create({
       baseURL: this.jenkinsUrl,
       auth: {
@@ -32,40 +31,15 @@ class JenkinsLogCapture {
     });
   }
 
-  /**
-   * Retry helper for transient failures
-   */
-  async retryOperation(operation, operationName, retries = this.maxRetries) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        const isLastAttempt = attempt === retries;
-        const isRetryable = error.code === 'ECONNRESET' || 
-                           error.code === 'ETIMEDOUT' || 
-                           error.code === 'ECONNREFUSED' ||
-                           (error.response && error.response.status >= 500);
-        
-        if (isLastAttempt || !isRetryable) {
-          throw error;
-        }
-        
-        const delay = this.retryDelay * attempt;
-        logger.warn(`${operationName} failed (attempt ${attempt}/${retries}), retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
+  // Retry logic removed - now handled by axios-config globally
 
   /**
    * Get the latest build number for a job
    */
   async getLatestBuildNumber() {
     try {
-      return await this.retryOperation(async () => {
-        const response = await this.client.get(`/job/${this.jobName}/api/json`);
-        return response.data.lastBuild?.number || null;
-      }, 'Get latest build number');
+      const response = await this.client.get(`/job/${this.jobName}/api/json`);
+      return response.data.lastBuild?.number || null;
     } catch (error) {
       logger.error(`Failed to get latest build: ${error.message}`);
       throw new Error(`Failed to get latest build: ${error.message}`);
@@ -77,18 +51,16 @@ class JenkinsLogCapture {
    */
   async getBuildStatus(buildNumber) {
     try {
-      return await this.retryOperation(async () => {
-        const response = await this.client.get(
-          `/job/${this.jobName}/${buildNumber}/api/json`
-        );
-        return {
-          number: response.data.number,
-          result: response.data.result,
-          building: response.data.building,
-          duration: response.data.duration,
-          timestamp: response.data.timestamp
-        };
-      }, `Get build status for #${buildNumber}`);
+      const response = await this.client.get(
+        `/job/${this.jobName}/${buildNumber}/api/json`
+      );
+      return {
+        number: response.data.number,
+        result: response.data.result,
+        building: response.data.building,
+        duration: response.data.duration,
+        timestamp: response.data.timestamp
+      };
     } catch (error) {
       logger.error(`Failed to get build status for #${buildNumber}: ${error.message}`);
       throw new Error(`Failed to get build status: ${error.message}`);
@@ -161,13 +133,11 @@ class JenkinsLogCapture {
    */
   async getConsoleOutput(buildNumber) {
     try {
-      return await this.retryOperation(async () => {
-        const response = await this.client.get(
-          `/job/${this.jobName}/${buildNumber}/consoleText`,
-          { responseType: 'text' }
-        );
-        return response.data;
-      }, `Get console output for #${buildNumber}`);
+      const response = await this.client.get(
+        `/job/${this.jobName}/${buildNumber}/consoleText`,
+        { responseType: 'text' }
+      );
+      return response.data;
     } catch (error) {
       logger.error(`Failed to get console output for #${buildNumber}: ${error.message}`);
       throw new Error(`Failed to get console output: ${error.message}`);

@@ -6,7 +6,7 @@
  */
 
 const { Kafka } = require('kafkajs');
-const axios = require('axios');
+const axios = require('./axios-config');
 const JenkinsLogCapture = require('./jenkins-log-capture');
 const logger = require('./logger');
 require('dotenv').config();
