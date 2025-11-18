@@ -2,7 +2,7 @@
  * Centralized logging configuration using Winston
  */
 
-const winston = require('winston');
+import winston from 'winston';
 
 // Define log levels
 const levels = {
@@ -34,7 +34,7 @@ const format = winston.format.combine(
 );
 
 // Define transports
-const transports = [
+const transports: winston.transport[] = [
   // Console transport
   new winston.transports.Console(),
   
@@ -59,11 +59,9 @@ const transports = [
 ];
 
 // Create logger instance
-const logger = winston.createLogger({
+export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   levels,
   format,
   transports,
 });
-
-module.exports = logger;

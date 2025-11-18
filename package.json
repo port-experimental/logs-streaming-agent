@@ -1,25 +1,31 @@
 {
-  "name": "your-node-app",
+  "name": "ci-cd-integration-monorepo",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo \"No tests yet\" && exit 0",
-    "build": "echo \"Build step\" && exit 0",
-    "capture:latest": "node jenkins-log-capture.js latest",
-    "capture:wait": "node jenkins-log-capture.js wait",
-    "webhook:server": "node webhook-server.js",
-    "kafka:consumer": "node port-kafka-consumer.js"
+    "build": "yarn workspace @cicd/shared build && yarn workspace @cicd/webhook-service build && yarn workspace @cicd/kafka-consumer-service build",
+    "dev:webhook": "yarn workspace @cicd/webhook-service dev",
+    "dev:kafka": "yarn workspace @cicd/kafka-consumer-service dev",
+    "test": "yarn workspaces run test",
+    "lint": "yarn workspaces run lint",
+    "clean": "yarn workspaces run clean && rm -rf node_modules",
+    "typecheck": "yarn workspaces run typecheck"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "axios": "^1.6.0",
-    "axios-retry": "^4.0.0",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "kafkajs": "^2.2.4",
-    "winston": "^3.18.3"
-  }
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

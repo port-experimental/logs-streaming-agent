@@ -3,10 +3,9 @@
  * This configuration is applied globally to all axios requests
  */
 
-const axios = require('axios');
-const axiosRetry = require('axios-retry').default;
-const { isNetworkError, isRetryableError, isIdempotentRequestError } = require('axios-retry');
-const logger = require('./logger');
+import axios from 'axios';
+import axiosRetry, { isNetworkError, isRetryableError, isIdempotentRequestError } from 'axios-retry';
+import { logger } from './logger';
 
 // Configure axios retry globally
 axiosRetry(axios, {
@@ -40,4 +39,5 @@ axiosRetry(axios, {
 });
 
 // Export configured axios instance
-module.exports = axios;
+export { axios };
+export default axios;
