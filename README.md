@@ -84,6 +84,10 @@ KAFKA_CONSUMER_GROUP_ID=your-org-id.consumer-group
 WEBHOOK_PORT=3000
 LOG_LEVEL=info
 NODE_ENV=development
+
+# Port Entity Auto-Creation (optional)
+AUTO_CREATE_ENTITIES=true              # Enable/disable auto-creation after builds
+ENTITY_BLUEPRINT_ID=microservice       # Default blueprint for auto-created entities
 ```
 
 ## 📖 Usage
@@ -129,6 +133,59 @@ yarn dev:kafka
     "serviceName": "my-service",
     "version": "1.0.0",
     "environment": "production"
+  }
+}
+```
+
+### Entity Auto-Creation
+
+When `AUTO_CREATE_ENTITIES=true`, the system automatically creates/updates a Port entity after successful builds:
+
+**What gets created:**
+- **Entity ID**: `{serviceName}-{environment}` (e.g., `my-service-production`)
+- **Blueprint**: Specified by `ENTITY_BLUEPRINT_ID` (default: `microservice`)
+- **Properties**: Build info, version, environment, timestamps, etc.
+
+**Control auto-creation:**
+```env
+# Enable auto-creation (default: false)
+AUTO_CREATE_ENTITIES=true
+
+# Specify blueprint (default: microservice)
+ENTITY_BLUEPRINT_ID=microservice
+```
+
+**Override per action:**
+```json
+{
+  "properties": {
+    "serviceName": "my-service",
+    "version": "2.0.0",
+    "environment": "production",
+    "blueprintId": "custom-blueprint",
+    "entityIdentifier": "custom-id",
+    "entityProperties": {
+      "custom_field": "value"
+    }
+  }
+}
+```
+
+**Manual entity creation:**
+```json
+{
+  "action": {
+    "identifier": "create_entity"
+  },
+  "properties": {
+    "blueprintId": "microservice",
+    "title": "User Service",
+    "identifier": "user-service-prod",
+    "entityProperties": {
+      "service_name": "user-service",
+      "version": "1.0.0",
+      "environment": "production"
+    }
   }
 }
 ```

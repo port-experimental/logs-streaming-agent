@@ -10,6 +10,7 @@ import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 import { logger, pluginRegistry, JenkinsProvider, CircleCIProvider } from '@cicd/shared';
 import { handleBuildAction } from './handlers/build-handler';
+import { handleBlueprintAction } from './handlers/blueprint-handler';
 import axios from 'axios';
 
 interface PortConfig {
@@ -250,6 +251,8 @@ class PortKafkaConsumer {
       // Route to appropriate handler
       if (action.identifier.includes('build') || action.identifier.includes('deploy')) {
         await handleBuildAction(message, this);
+      } else if (action.identifier.includes('blueprint') || action.identifier.includes('entity')) {
+        await handleBlueprintAction(message, this);
       } else {
         logger.warn(`⚠️  No specific handler for action: ${action.identifier}`);
         await this.addActionRunLog(runId, `Received action: ${action.identifier}`);

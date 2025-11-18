@@ -4,6 +4,7 @@
 
 import { pluginRegistry, logger } from '@cicd/shared';
 import type PortKafkaConsumer from '../consumer';
+import { BlueprintHandler } from './blueprint-handler';
 
 export async function handleBuildAction(message: any, consumer: PortKafkaConsumer): Promise<void> {
   const runId = message.context.runId;
@@ -88,6 +89,80 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
         runId,
         `✅ Successfully completed build #${buildInfo.buildNumber}!\nDuration: ${duration}s`
       );
+      
+      // Step 5: Auto-create entity in Port (if enabled)
+      const autoCreateEntities = process.env.AUTO_CREATE_ENTITIES === 'true';
+      const blueprintId = props.blueprintId || process.env.ENTITY_BLUEPRINT_ID;
+      
+      if (autoCreateEntities) {
+        await consumer.addActionRunLog(runId, '📦 Creating/updating entity in Port...');
+        
+        try {
+          const blueprintHandler = new BlueprintHandler(consumer);
+          
+          // Build entity data
+          const entityIdentifier = props.entityIdentifier || 
+            `${serviceName}-${environment}`.replace(/\s+/g, '-').toLowerCase();
+          
+          // Build entity properties dynamically from action properties
+          // This allows all properties from the Port action to be mapped to the entity
+          const entityProperties: Record<string, any> = {
+            // Core properties from action
+            service_name: serviceName,
+            version: version,
+            environment: environment,
+            
+            // Build metadata (auto-populated)
+            last_deployed: new Date().toISOString(),
+            build_number: buildInfo.buildNumber,
+            build_url: buildInfo.buildUrl,
+            ci_provider: provider,
+            branch: branch,
+            
+            // Map all other properties from the action
+            // This includes: language, repository_url, health_status, replicas, cpu_usage, memory_usage, etc.
+            ...Object.keys(props).reduce((acc, key) => {
+              // Skip internal/control properties
+              const skipKeys = ['provider', 'ci_provider', 'serviceName', 'service_name', 
+                               'blueprintId', 'entityIdentifier', 'entityTitle', 
+                               'entityProperties', 'relations'];
+              
+              if (!skipKeys.includes(key) && props[key] !== undefined) {
+                acc[key] = props[key];
+              }
+              return acc;
+            }, {} as Record<string, any>),
+            
+            // Override with explicit entityProperties if provided
+            ...props.entityProperties,
+          };
+          
+          const entityData = {
+            identifier: entityIdentifier,
+            title: props.entityTitle || `${serviceName} (${environment})`,
+            properties: entityProperties,
+            relations: props.relations || {},
+          };
+          
+          await blueprintHandler.createEntity(blueprintId, entityData, runId);
+          
+          await consumer.addActionRunLog(
+            runId,
+            `✅ Entity '${entityIdentifier}' created/updated in blueprint '${blueprintId}'`,
+            'SUCCESS'
+          );
+        } catch (entityError: any) {
+          // Don't fail the build if entity creation fails
+          logger.warn(`⚠️ Failed to create entity: ${entityError.message}`);
+          await consumer.addActionRunLog(
+            runId,
+            `⚠️ Warning: Failed to create entity: ${entityError.message}`,
+            'WARNING'
+          );
+        }
+      } else {
+        logger.info('ℹ️ Entity auto-creation is disabled (AUTO_CREATE_ENTITIES=false)');
+      }
     } else {
       throw new Error(`Build failed with status: ${buildStatus.result}`);
     }
