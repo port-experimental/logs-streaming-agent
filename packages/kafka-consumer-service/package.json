@@ -4,7 +4,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc",
     "dev": "tsx watch src/consumer.ts",
     "start": "node dist/consumer.js",
     "clean": "rm -rf dist",
