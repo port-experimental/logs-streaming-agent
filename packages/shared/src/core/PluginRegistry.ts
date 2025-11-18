@@ -26,12 +26,12 @@ export class PluginRegistry {
       provider.validateConfig();
       
       this.providers.set(name, provider);
-      logger.info(`✅ Registered CI/CD provider: ${name}`);
+      logger.info(`Registered CI/CD provider: ${name}`);
       
       return provider;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to register provider ${ProviderClass.name}: ${errorMsg}`);
+      logger.error(`Failed to register provider ${ProviderClass.name}: ${errorMsg}`);
       throw error;
     }
   }

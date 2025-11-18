@@ -65,7 +65,7 @@ export class JenkinsProvider extends CIProviderInterface {
 
   async triggerBuild(parameters: Record<string, any> = {}): Promise<BuildInfo> {
     try {
-      logger.info(`🔨 Triggering Jenkins build for job: ${this.jobName}`);
+      logger.info(`Triggering Jenkins build for job: ${this.jobName}`);
       
       const hasParameters = parameters && Object.keys(parameters).length > 0;
       const endpoint = hasParameters ? 'buildWithParameters' : 'build';
@@ -88,7 +88,7 @@ export class JenkinsProvider extends CIProviderInterface {
       
       const buildUrl = `${this.jenkinsUrl}/job/${this.jobName}/${buildNumber}`;
       
-      logger.info(`✅ Build #${buildNumber} triggered successfully`);
+      logger.info(`Build #${buildNumber} triggered successfully`);
       
       return {
         buildId: buildNumber.toString(),
@@ -97,7 +97,7 @@ export class JenkinsProvider extends CIProviderInterface {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error('❌ Jenkins trigger error:', errorMsg);
+      logger.error('Jenkins trigger error:', errorMsg);
       throw new Error(`Failed to trigger Jenkins build: ${errorMsg}`);
     }
   }

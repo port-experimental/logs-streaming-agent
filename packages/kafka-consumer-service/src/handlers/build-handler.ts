@@ -18,7 +18,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
     throw new Error(`CI/CD provider '${provider}' is not registered. Available providers: ${pluginRegistry.getProviderNames().join(', ')}`);
   }
   
-  await consumer.addActionRunLog(runId, `🚀 Starting build using ${provider}...`);
+  await consumer.addActionRunLog(runId, `Starting build using ${provider}...`);
   
   const serviceName = props.serviceName || props.service_name || 'service';
   const version = props.version || '1.0.0';
@@ -32,7 +32,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
   
   try {
     // Step 1: Trigger build
-    await consumer.addActionRunLog(runId, '📡 Triggering build...');
+    await consumer.addActionRunLog(runId, 'Triggering build...');
     
     const buildInfo = await ciProvider.triggerBuild({
       SERVICE_NAME: serviceName,
@@ -43,7 +43,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
       ...props, // Pass through any additional properties
     });
     
-    await consumer.addActionRunLog(runId, `✅ Build #${buildInfo.buildNumber} started`);
+    await consumer.addActionRunLog(runId, `Build #${buildInfo.buildNumber} started`);
     
     // Step 2: Update Port with build link
     await consumer.updateActionRun(runId, {
@@ -52,7 +52,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
     });
     
     // Step 3: Stream build logs to Port in real-time
-    await consumer.addActionRunLog(runId, '📋 Streaming build logs...');
+    await consumer.addActionRunLog(runId, 'Streaming build logs...');
     await consumer.addActionRunLog(runId, '─'.repeat(80));
     
     let logBuffer = '';
@@ -87,7 +87,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
     if (isSuccess) {
       await consumer.addActionRunLog(
         runId,
-        `✅ Successfully completed build #${buildInfo.buildNumber}!\nDuration: ${duration}s`
+        `Successfully completed build #${buildInfo.buildNumber}!\nDuration: ${duration}s`
       );
       
       // Step 5: Auto-create entity in Port (if enabled)
@@ -95,7 +95,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
       const blueprintId = props.blueprintId || process.env.ENTITY_BLUEPRINT_ID;
       
       if (autoCreateEntities) {
-        await consumer.addActionRunLog(runId, '📦 Creating/updating entity in Port...');
+        await consumer.addActionRunLog(runId, 'Creating/updating entity in Port...');
         
         try {
           const blueprintHandler = new BlueprintHandler(consumer);
@@ -148,20 +148,20 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
           
           await consumer.addActionRunLog(
             runId,
-            `✅ Entity '${entityIdentifier}' created/updated in blueprint '${blueprintId}'`,
+            `Entity '${entityIdentifier}' created/updated in blueprint '${blueprintId}'`,
             'SUCCESS'
           );
         } catch (entityError: any) {
           // Don't fail the build if entity creation fails
-          logger.warn(`⚠️ Failed to create entity: ${entityError.message}`);
+          logger.warn(`Failed to create entity: ${entityError.message}`);
           await consumer.addActionRunLog(
             runId,
-            `⚠️ Warning: Failed to create entity: ${entityError.message}`,
+            `Warning: Failed to create entity: ${entityError.message}`,
             'WARNING'
           );
         }
       } else {
-        logger.info('ℹ️ Entity auto-creation is disabled (AUTO_CREATE_ENTITIES=false)');
+        logger.info('Entity auto-creation is disabled (AUTO_CREATE_ENTITIES=false)');
       }
     } else {
       throw new Error(`Build failed with status: ${buildStatus.result}`);
@@ -171,7 +171,7 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
     const errorMsg = error instanceof Error ? error.message : String(error);
     await consumer.addActionRunLog(
       runId,
-      `❌ Build failed: ${errorMsg}`
+      `Build failed: ${errorMsg}`
     );
     throw error;
   }

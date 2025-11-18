@@ -56,7 +56,7 @@ export class CircleCIProvider extends CIProviderInterface {
 
   async triggerBuild(parameters: Record<string, any> = {}): Promise<BuildInfo> {
     try {
-      logger.info(`🔨 Triggering CircleCI pipeline for: ${this.projectSlug}`);
+      logger.info(`Triggering CircleCI pipeline for: ${this.projectSlug}`);
       
       const response = await this.client.post(
         `/project/${this.projectSlug}/pipeline`,
@@ -80,7 +80,7 @@ export class CircleCIProvider extends CIProviderInterface {
       const workflow = workflowResponse.data.items[0];
       const buildUrl = `https://app.circleci.com/pipelines/${this.projectSlug}/${pipelineNumber}/workflows/${workflow.id}`;
       
-      logger.info(`✅ Pipeline #${pipelineNumber} triggered successfully`);
+      logger.info(`Pipeline #${pipelineNumber} triggered successfully`);
       
       return {
         buildId: workflow.id,
@@ -90,7 +90,7 @@ export class CircleCIProvider extends CIProviderInterface {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error('❌ CircleCI trigger error:', errorMsg);
+      logger.error('CircleCI trigger error:', errorMsg);
       throw new Error(`Failed to trigger CircleCI pipeline: ${errorMsg}`);
     }
   }

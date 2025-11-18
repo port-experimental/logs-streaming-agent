@@ -57,7 +57,7 @@ export class BlueprintHandler {
     const token = await this.consumer.getAccessToken();
     const orgId = process.env.PORT_ORG_ID;
 
-    logger.info(`📘 Creating/updating blueprint: ${blueprint.identifier}`);
+    logger.info(`Creating/updating blueprint: ${blueprint.identifier}`);
 
     try {
       const response = await axios.put(
@@ -71,10 +71,10 @@ export class BlueprintHandler {
         }
       );
 
-      logger.info(`✅ Blueprint ${blueprint.identifier} created/updated successfully`);
+      logger.info(`Blueprint ${blueprint.identifier} created/updated successfully`);
       return response.data;
     } catch (error: any) {
-      logger.error(`❌ Failed to create/update blueprint: ${error.message}`);
+      logger.error(`Failed to create/update blueprint: ${error.message}`);
       throw error;
     }
   }
@@ -89,7 +89,7 @@ export class BlueprintHandler {
   ): Promise<void> {
     const token = await this.consumer.getAccessToken();
 
-    logger.info(`📦 Creating entity: ${entityData.identifier} (blueprint: ${blueprintId})`);
+    logger.info(`Creating entity: ${entityData.identifier} (blueprint: ${blueprintId})`);
 
     if (runId) {
       await this.consumer.addActionRunLog(
@@ -110,24 +110,24 @@ export class BlueprintHandler {
         }
       );
 
-      logger.info(`✅ Entity ${entityData.identifier} created successfully`);
+      logger.info(`Entity ${entityData.identifier} created successfully`);
       
       if (runId) {
         await this.consumer.addActionRunLog(
           runId,
-          `✅ Entity created: ${entityData.identifier}`,
+          `Entity created: ${entityData.identifier}`,
           'SUCCESS'
         );
       }
 
       return response.data;
     } catch (error: any) {
-      logger.error(`❌ Failed to create entity: ${error.message}`);
+      logger.error(`Failed to create entity: ${error.message}`);
       
       if (runId) {
         await this.consumer.addActionRunLog(
           runId,
-          `❌ Failed to create entity: ${error.message}`,
+          `Failed to create entity: ${error.message}`,
           'FAILURE'
         );
       }
@@ -152,14 +152,14 @@ export class BlueprintHandler {
         blueprint = this.loadBlueprintFromFile(properties.blueprintFile);
         await consumer.addActionRunLog(
           runId,
-          `📘 Loaded blueprint from file: ${properties.blueprintFile}`
+          `Loaded blueprint from file: ${properties.blueprintFile}`
         );
       } else if (properties.blueprintDefinition) {
         // Use provided definition
         blueprint = properties.blueprintDefinition;
         await consumer.addActionRunLog(
           runId,
-          `📘 Using provided blueprint definition`
+          `Using provided blueprint definition`
         );
       } else {
         throw new Error('No blueprint file or definition provided');
@@ -170,15 +170,15 @@ export class BlueprintHandler {
 
       await consumer.addActionRunLog(
         runId,
-        `✅ Blueprint ${blueprint.identifier} created successfully`,
+        `Blueprint ${blueprint.identifier} created successfully`,
         'SUCCESS'
       );
 
     } catch (error: any) {
-      logger.error('❌ Error creating blueprint:', error);
+      logger.error('Error creating blueprint:', error);
       await consumer.addActionRunLog(
         runId,
-        `❌ Failed to create blueprint: ${error.message}`,
+        `Failed to create blueprint: ${error.message}`,
         'FAILURE'
       );
       throw error;
@@ -209,7 +209,7 @@ export class BlueprintHandler {
 
       await consumer.addActionRunLog(
         runId,
-        `📦 Creating entity in blueprint: ${blueprintId}`
+        `Creating entity in blueprint: ${blueprintId}`
       );
 
       // Create the entity
@@ -217,15 +217,15 @@ export class BlueprintHandler {
 
       await consumer.addActionRunLog(
         runId,
-        `✅ Entity ${entityData.identifier} created successfully`,
+        `Entity ${entityData.identifier} created successfully`,
         'SUCCESS'
       );
 
     } catch (error: any) {
-      logger.error('❌ Error creating entity:', error);
+      logger.error('Error creating entity:', error);
       await consumer.addActionRunLog(
         runId,
-        `❌ Failed to create entity: ${error.message}`,
+        `Failed to create entity: ${error.message}`,
         'FAILURE'
       );
       throw error;

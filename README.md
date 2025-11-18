@@ -6,17 +6,17 @@ A **pluggable, TypeScript-based monorepo** for integrating multiple CI/CD provid
 [![Node](https://img.shields.io/badge/Node-%3E%3D18.0-green.svg)](https://nodejs.org/)
 [![Yarn](https://img.shields.io/badge/Yarn-Workspaces-2c8ebb.svg)](https://yarnpkg.com/)
 
-## 🎯 What This Does
+## What This Does
 
 This monorepo provides a **plugin-based architecture** that allows you to:
 
-- ✅ **Integrate any CI/CD provider** without modifying core code
-- ✅ **Receive webhooks** from CI/CD platforms and stream build logs
-- ✅ **Trigger builds** from Port.io self-service actions via Kafka
-- ✅ **Stream logs to Port** in real-time
-- ✅ **Add new providers** in under 30 minutes
+- **Integrate any CI/CD provider** without modifying core code
+- **Receive webhooks** from CI/CD platforms and stream build logs
+- **Trigger builds** from Port.io self-service actions via Kafka
+- **Stream logs to Port** in real-time
+- **Add new providers** in under 30 minutes
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Install dependencies
@@ -34,7 +34,7 @@ yarn dev:webhook    # Terminal 1
 yarn dev:kafka      # Terminal 2
 ```
 
-## 📦 Packages
+## Packages
 
 | Package | Description | Entry Point |
 |---------|-------------|-------------|
@@ -42,16 +42,16 @@ yarn dev:kafka      # Terminal 2
 | **`@cicd/webhook-service`** | Generic webhook server with auto-registration | `packages/webhook-service/src/server.ts` |
 | **`@cicd/kafka-consumer-service`** | Port.io Kafka consumer for action handling | `packages/kafka-consumer-service/src/consumer.ts` |
 
-## 🔌 Supported Providers
+## Supported Providers
 
 | Provider | Status | Trigger Builds | Stream Logs | Webhooks |
 |----------|--------|----------------|-------------|----------|
-| **Jenkins** | ✅ Ready | ✅ | ✅ | ✅ |
-| **CircleCI** | ✅ Ready | ✅ | ✅ | ✅ |
-| **GitHub Actions** | 🔜 Coming Soon | - | - | - |
-| **GitLab CI** | 🔜 Coming Soon | - | - | - |
+| **Jenkins** | Ready | | | |
+| **CircleCI** | Ready | | | |
+| **GitHub Actions** | Coming Soon | - | - | - |
+| **GitLab CI** | Coming Soon | - | - | - |
 
-## ⚙️ Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -190,7 +190,7 @@ ENTITY_BLUEPRINT_ID=microservice
 }
 ```
 
-## 🔧 Development
+## Development
 
 ### Available Commands
 
@@ -309,7 +309,7 @@ if (process.env.YOUR_PROVIDER_API_TOKEN) {
 
 **That's it!** Your provider is now available in both services.
 
-## 🛡️ Error Handling & Retry Logic
+## Error Handling & Retry Logic
 
 ### HTTP Retry (All API Calls)
 
@@ -332,7 +332,7 @@ Consecutive error tracking:
 - **Retry delay:** 2 seconds
 - **Fail-safe:** Throws after max attempts
 
-## 📊 Logging
+## Logging
 
 Winston-based logging with multiple transports:
 
@@ -386,7 +386,7 @@ spec:
             name: ci-secrets
 ```
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Build Errors
 
@@ -417,7 +417,7 @@ echo $CIRCLECI_API_TOKEN
 3. Ensure consumer group ID format is correct
 4. Review consumer logs
 
-## 📚 API Reference
+## API Reference
 
 ### Webhook Endpoints
 
@@ -472,11 +472,11 @@ Service status and active tasks.
 4. Add environment variables to `.env.example`
 5. Update this README
 
-## 📄 License
+## License
 
 ISC
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with TypeScript, Yarn Workspaces, and Express
 - Integrates with Port.io for self-service actions
@@ -484,4 +484,4 @@ ISC
 
 ---
 
-**Made with ❤️ for DevOps teams**
+**Made for DevOps teams**

@@ -20,7 +20,7 @@ const activeTasks = new Map<string, boolean>();
  * Initialize and register CI/CD providers based on environment config
  */
 function initializeProviders(): void {
-  logger.info('\n🔌 Initializing CI/CD Providers...');
+  logger.info('\nInitializing CI/CD Providers...');
   logger.info('='.repeat(80));
   
   // Register Jenkins if configured
@@ -53,7 +53,7 @@ function initializeProviders(): void {
   }
   
   const registeredProviders = pluginRegistry.getProviderNames();
-  logger.info(`\n✅ Registered providers: ${registeredProviders.join(', ')}`);
+  logger.info(`\nRegistered providers: ${registeredProviders.join(', ')}`);
   logger.info('='.repeat(80) + '\n');
 }
 
@@ -71,7 +71,7 @@ async function handleWebhook(providerName: string, payload: any): Promise<void> 
   const buildData = provider.parseWebhookPayload(payload);
   const normalizedData = provider.normalizeBuildData(buildData);
   
-  logger.info(`\n📨 ${providerName.toUpperCase()} Webhook Received`);
+  logger.info(`\n${providerName.toUpperCase()} Webhook Received`);
   logger.info(`Build: #${normalizedData.buildNumber}`);
   logger.info(`Status: ${normalizedData.status}`);
   logger.info(`URL: ${normalizedData.buildUrl}`);
@@ -80,7 +80,7 @@ async function handleWebhook(providerName: string, payload: any): Promise<void> 
   
   // Handle based on build status
   if (normalizedData.status === 'running' || normalizedData.status === 'pending') {
-    logger.info(`\n📊 Starting real-time log capture for build #${normalizedData.buildNumber}...`);
+    logger.info(`\nStarting real-time log capture for build #${normalizedData.buildNumber}...`);
     
     if (!activeTasks.has(taskKey)) {
       activeTasks.set(taskKey, true);
@@ -100,24 +100,24 @@ async function handleWebhook(providerName: string, payload: any): Promise<void> 
         logger.info(`Result: ${buildStatus.result}`);
         logger.info(`Duration: ${buildStatus.duration}ms`);
 
-        logger.info(`\n✅ Build #${normalizedData.buildNumber} completed: ${buildStatus.result}`);
+        logger.info(`\nBuild #${normalizedData.buildNumber} completed: ${buildStatus.result}`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        logger.error(`\n❌ Error monitoring build #${normalizedData.buildNumber}: ${errorMsg}`);
+        logger.error(`\nError monitoring build #${normalizedData.buildNumber}: ${errorMsg}`);
       } finally {
         activeTasks.delete(taskKey);
       }
     }
   } else {
     // Build already completed, just fetch logs
-    logger.info(`\n📥 Fetching logs for completed build #${normalizedData.buildNumber}...`);
+    logger.info(`\nFetching logs for completed build #${normalizedData.buildNumber}...`);
     
     try {
       const logs = await provider.getCompleteLogs(normalizedData.buildId);
-      logger.info(`✅ Logs retrieved for build #${normalizedData.buildNumber} (${normalizedData.status})`);
+      logger.info(`Logs retrieved for build #${normalizedData.buildNumber} (${normalizedData.status})`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Error fetching logs: ${errorMsg}`);
+      logger.error(`Error fetching logs: ${errorMsg}`);
     }
   }
 }
@@ -217,11 +217,11 @@ const server = app.listen(PORT, () => {
   // Setup webhook routes
   setupWebhookRoutes();
   
-  logger.info('\n🚀 CI/CD Webhook Server Started');
+  logger.info('\nCI/CD Webhook Server Started');
   logger.info('='.repeat(80));
-  logger.info(`📡 Listening on port ${PORT}`);
+  logger.info(`Listening on port ${PORT}`);
   logger.info(`💚 Health check: http://localhost:${PORT}/health`);
-  logger.info(`📊 Status: http://localhost:${PORT}/status`);
+  logger.info(`Status: http://localhost:${PORT}/status`);
   logger.info('='.repeat(80));
   logger.info('\n⏳ Waiting for webhooks...\n');
 });

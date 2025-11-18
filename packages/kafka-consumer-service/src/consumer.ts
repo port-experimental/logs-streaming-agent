@@ -104,7 +104,7 @@ class PortKafkaConsumer {
       throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
     }
 
-    logger.info('✅ Configuration validation passed');
+    logger.info('Configuration validation passed');
   }
 
   private setupKafkaErrorHandlers(): void {
@@ -153,7 +153,7 @@ class PortKafkaConsumer {
       return this.accessToken;
     }
 
-    logger.info('🔑 Fetching new Port API access token...');
+    logger.info('Fetching new Port API access token...');
     
     try {
       const response = await axios.post(`${this.portApiUrl}/auth/access_token`, {
@@ -164,11 +164,11 @@ class PortKafkaConsumer {
       this.accessToken = response.data.accessToken;
       this.tokenExpiry = Date.now() + (55 * 60 * 1000);
       
-      logger.info('✅ Access token obtained');
+      logger.info('Access token obtained');
       return this.accessToken!;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error('❌ Failed to get access token:', errorMsg);
+      logger.error('Failed to get access token:', errorMsg);
       throw error;
     }
   }
@@ -188,11 +188,11 @@ class PortKafkaConsumer {
         }
       );
 
-      logger.info(`✅ Updated action run ${runId}: ${updates.status || 'IN_PROGRESS'}`);
+      logger.info(`Updated action run ${runId}: ${updates.status || 'IN_PROGRESS'}`);
       return response.data;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to update action run ${runId}: ${errorMsg}`);
+      logger.error(`Failed to update action run ${runId}: ${errorMsg}`);
       throw error;
     }
   }
@@ -216,18 +216,18 @@ class PortKafkaConsumer {
         }
       );
 
-      logger.debug(`📝 Added log to action run ${runId}`);
+      logger.debug(`Added log to action run ${runId}`);
       return response.data;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to add log to action run ${runId}: ${errorMsg}`);
+      logger.error(`Failed to add log to action run ${runId}: ${errorMsg}`);
       throw error;
     }
   }
 
   private async processActionMessage(message: any): Promise<void> {
     logger.info('\n' + '='.repeat(80));
-    logger.info('📨 Processing Action Invocation');
+    logger.info('Processing Action Invocation');
     logger.info('='.repeat(80));
 
     const runId = message.context.runId;
@@ -235,10 +235,10 @@ class PortKafkaConsumer {
     const properties = message.properties;
 
     logger.info(`
-      🔹 Run ID: ${runId}
-      🔹 Action: ${action.identifier}
-      🔹 User: ${message.context.by.email}
-      🔹 Properties: ${JSON.stringify(properties, null, 2)}
+      Run ID: ${runId}
+      Action: ${action.identifier}
+      User: ${message.context.by.email}
+      Properties: ${JSON.stringify(properties, null, 2)}
     `);
 
     try {
@@ -254,7 +254,7 @@ class PortKafkaConsumer {
       } else if (action.identifier.includes('blueprint') || action.identifier.includes('entity')) {
         await handleBlueprintAction(message, this);
       } else {
-        logger.warn(`⚠️  No specific handler for action: ${action.identifier}`);
+        logger.warn(`No specific handler for action: ${action.identifier}`);
         await this.addActionRunLog(runId, `Received action: ${action.identifier}`);
       }
 
@@ -267,7 +267,7 @@ class PortKafkaConsumer {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error('❌ Error processing action:', errorMsg);
+      logger.error('Error processing action:', errorMsg);
       
       await this.addActionRunLog(
         runId,
@@ -279,7 +279,7 @@ class PortKafkaConsumer {
   }
 
   private initializeProviders(): void {
-    logger.info('\n🔌 Initializing CI/CD Providers...');
+    logger.info('\nInitializing CI/CD Providers...');
     
     // Register Jenkins if configured
     if (process.env.JENKINS_URL && process.env.JENKINS_API_TOKEN) {
@@ -310,7 +310,7 @@ class PortKafkaConsumer {
       }
     }
     
-    logger.info(`✅ Registered providers: ${pluginRegistry.getProviderNames().join(', ')}`);
+    logger.info(`Registered providers: ${pluginRegistry.getProviderNames().join(', ')}`);
   }
 
   async start(): Promise<void> {
@@ -319,10 +319,10 @@ class PortKafkaConsumer {
       return;
     }
 
-    logger.info('\n' + '🚀 Port Kafka Consumer Starting'.padEnd(80, '='));
+    logger.info('\n' + 'Port Kafka Consumer Starting'.padEnd(80, '='));
     logger.info('='.repeat(80));
     logger.info(`
-📊 Configuration:
+Configuration:
    - Organization ID: ${this.config.orgId}
    - Actions Topic: ${this.actionsTopic}
    - Consumer Group: ${this.config.consumerGroupId}
@@ -333,20 +333,20 @@ class PortKafkaConsumer {
     this.initializeProviders();
 
     try {
-      logger.info('🔌 Connecting to Kafka...');
+      logger.info('Connecting to Kafka...');
       await this.consumer.connect();
       this.isConnected = true;
-      logger.info('✅ Connected to Kafka');
+      logger.info('Connected to Kafka');
 
-      logger.info(`📡 Subscribing to topic: ${this.actionsTopic}`);
+      logger.info(`Subscribing to topic: ${this.actionsTopic}`);
       await this.consumer.subscribe({ 
         topic: this.actionsTopic,
         fromBeginning: false,
       });
-      logger.info('✅ Subscribed to actions topic');
+      logger.info('Subscribed to actions topic');
 
       logger.info('\n' + '='.repeat(80));
-      logger.info('✅ Consumer Ready - Waiting for messages...');
+      logger.info('Consumer Ready - Waiting for messages...');
       logger.info('='.repeat(80) + '\n');
 
       await this.consumer.run({
@@ -360,14 +360,14 @@ class PortKafkaConsumer {
 
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
-            logger.error('❌ Error processing message:', errorMsg);
+            logger.error('Error processing message:', errorMsg);
           }
         },
       });
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error('❌ Failed to start consumer:', errorMsg);
+      logger.error('Failed to start consumer:', errorMsg);
       this.isConnected = false;
       throw error;
     }
@@ -375,14 +375,14 @@ class PortKafkaConsumer {
 
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
-    logger.info('\n🛑 Shutting down consumer...');
+    logger.info('\nShutting down consumer...');
     
     try {
       if (this.isConnected) {
         await this.consumer.disconnect();
         this.isConnected = false;
       }
-      logger.info('✅ Consumer disconnected');
+      logger.info('Consumer disconnected');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Error during shutdown:', errorMsg);
