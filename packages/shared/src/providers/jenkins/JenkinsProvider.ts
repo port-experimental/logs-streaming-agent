@@ -102,6 +102,57 @@ export class JenkinsProvider extends CIProviderInterface {
     }
   }
 
+  async getCurrentStage(buildId: string): Promise<{ name: string; status: string; durationMillis: number } | null> {
+    try {
+      const response = await this.client.get(
+        `/job/${this.jobName}/${buildId}/wfapi/describe`,
+        { timeout: 10000 }
+      );
+      
+      logger.debug(`Stage API response for build #${buildId}: ${JSON.stringify(response.data)}`);
+      
+      const stages = response.data.stages || [];
+      
+      if (stages.length === 0) {
+        logger.debug('No stages found in workflow API response');
+        return null;
+      }
+      
+      // Find the currently running stage
+      const runningStage = stages.find((stage: any) => stage.status === 'IN_PROGRESS');
+      if (runningStage) {
+        logger.info(`Current stage: ${runningStage.name} [IN_PROGRESS]`);
+        return {
+          name: runningStage.name,
+          status: runningStage.status,
+          durationMillis: runningStage.durationMillis
+        };
+      }
+      
+      // If no running stage, return the last completed stage
+      const completedStages = stages.filter((stage: any) => stage.status !== 'NOT_EXECUTED');
+      if (completedStages.length > 0) {
+        const lastStage = completedStages[completedStages.length - 1];
+        logger.debug(`Last completed stage: ${lastStage.name} [${lastStage.status}]`);
+        return {
+          name: lastStage.name,
+          status: lastStage.status,
+          durationMillis: lastStage.durationMillis
+        };
+      }
+      
+      return null;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        logger.error(`Workflow API not available (404). Install 'Pipeline: Stage View Plugin' in Jenkins.`);
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.warn(`Could not get stage info: ${errorMsg}`);
+      }
+      return null;
+    }
+  }
+
   async getBuildStatus(buildId: string): Promise<BuildStatusInfo> {
     try {
       const response = await this.client.get(

@@ -57,20 +57,55 @@ export async function handleBuildAction(message: any, consumer: PortKafkaConsume
     
     let logBuffer = '';
     const CHUNK_SIZE = 500; // Send logs in chunks to avoid overwhelming Port API
+    let currentStage: string | null = null;
     
-    await ciProvider.streamLogs(buildInfo.buildId, async (logChunk: string) => {
-      logBuffer += logChunk;
-      
-      // Send logs in chunks to Port
-      if (logBuffer.length >= CHUNK_SIZE) {
-        await consumer.addActionRunLog(runId, logBuffer);
-        logBuffer = '';
+    // Function to check and update stage
+    const checkStage = async () => {
+      try {
+        // Only check stages for Jenkins provider (requires Workflow API)
+        if (provider === 'jenkins' && 'getCurrentStage' in ciProvider) {
+          const stageInfo = await (ciProvider as any).getCurrentStage(buildInfo.buildId);
+          if (stageInfo && stageInfo.name !== currentStage) {
+            currentStage = stageInfo.name;
+            const duration = stageInfo.durationMillis ? `(${(stageInfo.durationMillis / 1000).toFixed(0)}s)` : '';
+            
+            await consumer.updateActionRun(runId, {
+              statusLabel: `Build #${buildInfo.buildNumber} - ${stageInfo.status === 'IN_PROGRESS' ? 'Running' : 'Completed'}: ${currentStage} ${duration}`.trim(),
+            });
+            
+            logger.info(`Stage: ${currentStage} [${stageInfo.status}]`);
+          }
+        }
+      } catch (error) {
+        logger.debug(`Stage check error: ${error}`);
       }
-    });
+    };
     
-    // Send any remaining logs
-    if (logBuffer.length > 0) {
-      await consumer.addActionRunLog(runId, logBuffer);
+    // Check stage immediately
+    await checkStage();
+    
+    // Then poll for stage changes every 1 second
+    const stageCheckInterval = setInterval(checkStage, 1000);
+    
+    try {
+      // Stream logs
+      await ciProvider.streamLogs(buildInfo.buildId, async (logChunk: string) => {
+        logBuffer += logChunk;
+        
+        // Send logs in chunks to Port
+        if (logBuffer.length >= CHUNK_SIZE) {
+          await consumer.addActionRunLog(runId, logBuffer);
+          logBuffer = '';
+        }
+      });
+      
+      // Send any remaining logs
+      if (logBuffer.length > 0) {
+        await consumer.addActionRunLog(runId, logBuffer);
+      }
+    } finally {
+      // Stop polling when streaming completes
+      clearInterval(stageCheckInterval);
     }
     
     await consumer.addActionRunLog(runId, '─'.repeat(80));
