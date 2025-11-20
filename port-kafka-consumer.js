@@ -488,7 +488,7 @@ class PortKafkaConsumer {
 
     try {
       // Step 1: Trigger Jenkins build
-      await this.addActionRunLog(runId, '📡 Triggering Jenkins build...');
+      await this.addActionRunLog(runId, 'Triggering Jenkins build...');
       
       const buildNumber = await this.triggerJenkinsBuild({
         SERVICE_NAME: serviceName,
@@ -502,7 +502,7 @@ class PortKafkaConsumer {
       const jobName = this.jenkinsCapture.jobName;
       const buildUrl = `${jenkinsUrl}/job/${jobName}/${buildNumber}`;
 
-      await this.addActionRunLog(runId, `✅ Jenkins build #${buildNumber} started`);
+      await this.addActionRunLog(runId, `Jenkins build #${buildNumber} started`);
       
       // Step 2: Update Port with Jenkins link
       await this.updateActionRun(runId, {
@@ -511,25 +511,51 @@ class PortKafkaConsumer {
       });
 
       // Step 3: Stream Jenkins logs to Port in real-time
-      await this.addActionRunLog(runId, '📋 Streaming Jenkins logs...');
+      await this.addActionRunLog(runId, 'Streaming Jenkins logs...');
       await this.addActionRunLog(runId, '─'.repeat(80));
 
       let logBuffer = '';
       const CHUNK_SIZE = 500; // Send logs in chunks to avoid overwhelming Port API
+      let currentStage = null;
 
-      await this.jenkinsCapture.streamLogs(buildNumber, async (logChunk) => {
-        logBuffer += logChunk;
-        
-        // Send logs in chunks to Port
-        if (logBuffer.length >= CHUNK_SIZE) {
-          await this.addActionRunLog(runId, logBuffer);
-          logBuffer = '';
+      // Start polling for stage changes every 3 seconds
+      const stageCheckInterval = setInterval(async () => {
+        try {
+          const stageInfo = await this.jenkinsCapture.getCurrentStage(buildNumber);
+          if (stageInfo && stageInfo.name !== currentStage) {
+            currentStage = stageInfo.name;
+            const duration = stageInfo.durationMillis ? `(${(stageInfo.durationMillis / 1000).toFixed(0)}s)` : '';
+            
+            await this.updateActionRun(runId, {
+              statusLabel: `Build #${buildNumber} - ${stageInfo.status === 'IN_PROGRESS' ? 'Running' : 'Completed'}: ${currentStage} ${duration}`.trim(),
+            });
+            
+            logger.info(`Stage: ${currentStage} [${stageInfo.status}]`);
+          }
+        } catch (error) {
+          logger.debug(`Stage check error: ${error.message}`);
         }
-      });
+      }, 3000);
 
-      // Send any remaining logs
-      if (logBuffer.length > 0) {
-        await this.addActionRunLog(runId, logBuffer);
+      try {
+        // Stream logs
+        await this.jenkinsCapture.streamLogs(buildNumber, async (logChunk) => {
+          logBuffer += logChunk;
+          
+          // Send logs in chunks to Port
+          if (logBuffer.length >= CHUNK_SIZE) {
+            await this.addActionRunLog(runId, logBuffer);
+            logBuffer = '';
+          }
+        });
+
+        // Send any remaining logs
+        if (logBuffer.length > 0) {
+          await this.addActionRunLog(runId, logBuffer);
+        }
+      } finally {
+        // Stop polling when streaming completes
+        clearInterval(stageCheckInterval);
       }
 
       await this.addActionRunLog(runId, '─'.repeat(80));
@@ -547,7 +573,7 @@ class PortKafkaConsumer {
       if (isSuccess) {
         await this.addActionRunLog(
           runId,
-          `✅ Successfully deployed ${serviceName} v${version} to ${environment}!\nBuild #${buildNumber} completed in ${duration}s`
+          `Successfully deployed ${serviceName} v${version} to ${environment}!\nBuild #${buildNumber} completed in ${duration}s`
         );
       } else {
         throw new Error(`Jenkins build failed with status: ${buildStatus.result}`);
@@ -556,7 +582,7 @@ class PortKafkaConsumer {
     } catch (error) {
       await this.addActionRunLog(
         runId,
-        `❌ Deployment failed: ${error.message}`
+        `Deployment failed: ${error.message}`
       );
       throw error;
     }
