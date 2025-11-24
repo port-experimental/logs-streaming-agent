@@ -5,6 +5,29 @@ const path = require('path');
 const logger = require('./logger');
 
 /**
+ * Jenkins Build Status Constants
+ */
+const BUILD_STATUS = {
+  SUCCESS: 'SUCCESS',
+  FAILURE: 'FAILURE',
+  UNSTABLE: 'UNSTABLE',
+  ABORTED: 'ABORTED',
+  NOT_BUILT: 'NOT_BUILT',
+  BUILDING: 'BUILDING'
+};
+
+/**
+ * Jenkins Stage Status Constants
+ */
+const STAGE_STATUS = {
+  IN_PROGRESS: 'IN_PROGRESS',
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED',
+  ABORTED: 'ABORTED',
+  NOT_EXECUTED: 'NOT_EXECUTED'
+};
+
+/**
  * Jenkins Log Capture Application
  * Captures logs from Jenkins pipeline builds using Jenkins REST API
  */
@@ -66,9 +89,9 @@ class JenkinsLogCapture {
       }
       
       // Find the currently running stage
-      const runningStage = stages.find(stage => stage.status === 'IN_PROGRESS');
+      const runningStage = stages.find(stage => stage.status === STAGE_STATUS.IN_PROGRESS);
       if (runningStage) {
-        logger.info(`Current stage: ${runningStage.name} [IN_PROGRESS]`);
+        logger.info(`Current stage: ${runningStage.name} [${STAGE_STATUS.IN_PROGRESS}]`);
         return {
           name: runningStage.name,
           status: runningStage.status,
@@ -77,7 +100,7 @@ class JenkinsLogCapture {
       }
       
       // If no running stage, return the last completed stage
-      const completedStages = stages.filter(stage => stage.status !== 'NOT_EXECUTED');
+      const completedStages = stages.filter(stage => stage.status !== STAGE_STATUS.NOT_EXECUTED);
       if (completedStages.length > 0) {
         const lastStage = completedStages[completedStages.length - 1];
         logger.debug(`Last completed stage: ${lastStage.name} [${lastStage.status}]`);
@@ -293,17 +316,17 @@ class JenkinsLogCapture {
 // Example usage
 if (require.main === module) {
   const config = {
-    jenkinsUrl: process.env.JENKINS_URL || 'http://localhost:8080',
+    jenkinsUrl: process.env.JENKINS_URL,
     username: process.env.JENKINS_USERNAME,
     apiToken: process.env.JENKINS_API_TOKEN,
-    jobName: process.env.JENKINS_JOB_NAME || 'your-node-app'
+    jobName: process.env.JENKINS_JOB_NAME
   };
 
   // Validate configuration
   if (!config.username || !config.apiToken) {
     logger.error('Error: JENKINS_USERNAME and JENKINS_API_TOKEN must be set');
     logger.error('Create a .env file with:');
-    logger.error('JENKINS_URL=http://your-jenkins-server:8080');
+    logger.error('JENKINS_URL=http://your-jenkins-server:port');
     logger.error('JENKINS_USERNAME=your-username');
     logger.error('JENKINS_API_TOKEN=your-api-token');
     logger.error('JENKINS_JOB_NAME=your-job-name');
@@ -375,3 +398,5 @@ if (require.main === module) {
 }
 
 module.exports = JenkinsLogCapture;
+module.exports.BUILD_STATUS = BUILD_STATUS;
+module.exports.STAGE_STATUS = STAGE_STATUS;

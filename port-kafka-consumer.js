@@ -8,6 +8,7 @@
 const { Kafka } = require('kafkajs');
 const axios = require('./axios-config');
 const JenkinsLogCapture = require('./jenkins-log-capture');
+const { BUILD_STATUS, STAGE_STATUS } = require('./jenkins-log-capture');
 const logger = require('./logger');
 require('dotenv').config();
 
@@ -32,10 +33,10 @@ class PortKafkaConsumer {
 
     // Initialize Jenkins client
     this.jenkinsCapture = new JenkinsLogCapture({
-      jenkinsUrl: config.jenkinsUrl || process.env.JENKINS_URL || 'http://localhost:8080',
+      jenkinsUrl: config.jenkinsUrl || process.env.JENKINS_URL,
       username: config.jenkinsUsername || process.env.JENKINS_USERNAME,
       apiToken: config.jenkinsApiToken || process.env.JENKINS_API_TOKEN,
-      jobName: config.jenkinsJobName || process.env.JENKINS_JOB_NAME || 'your-node-app',
+      jobName: config.jenkinsJobName || process.env.JENKINS_JOB_NAME,
     });
 
     // Initialize Kafka client
@@ -527,7 +528,7 @@ class PortKafkaConsumer {
             const duration = stageInfo.durationMillis ? `(${(stageInfo.durationMillis / 1000).toFixed(0)}s)` : '';
             
             await this.updateActionRun(runId, {
-              statusLabel: `Build #${buildNumber} - ${stageInfo.status === 'IN_PROGRESS' ? 'Running' : 'Completed'}: ${currentStage} ${duration}`.trim(),
+              statusLabel: `Build #${buildNumber} - ${stageInfo.status === STAGE_STATUS.IN_PROGRESS ? 'Running' : 'Completed'}: ${currentStage} ${duration}`.trim(),
             });
             
             logger.info(`Stage: ${currentStage} [${stageInfo.status}]`);
@@ -562,7 +563,7 @@ class PortKafkaConsumer {
 
       // Step 4: Get final build status
       const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber);
-      const isSuccess = buildStatus.result === 'SUCCESS';
+      const isSuccess = buildStatus.result === BUILD_STATUS.SUCCESS;
       const duration = (buildStatus.duration / 1000).toFixed(2);
 
       await this.updateActionRun(runId, {
