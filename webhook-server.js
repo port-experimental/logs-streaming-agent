@@ -2,9 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const JenkinsLogCapture = require('./jenkins-log-capture');
-const { BUILD_STATUS } = require('./jenkins-log-capture');
 const logger = require('./logger');
 
 /**
@@ -14,51 +12,10 @@ const logger = require('./logger');
  */
 
 const app = express();
+app.use(express.json());
 
-// Parse JSON with raw body for signature verification
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf.toString('utf8');
-  }
-}));
-
-/**
- * State Management: In-Memory Task Tracking
- * 
- * PRODUCTION NOTE: This uses in-memory Map for simplicity.
- * For production/scaling scenarios, consider:
- * - Redis: Distributed state across multiple instances
- * - Database: Persistent task tracking
- * - Message Queue: Decouple webhook receipt from log processing
- * 
- * Example Redis implementation:
- *   const redis = require('redis');
- *   const client = redis.createClient({ url: process.env.REDIS_URL });
- *   await client.set(`task:${taskKey}`, 'processing', { EX: 3600 });
- */
+// Store active build monitoring tasks
 const activeTasks = new Map();
-
-/**
- * Security: Environment Variable Validation
- * 
- * SECURITY BEST PRACTICES:
- * 1. Never commit .env files to version control
- * 2. Use secrets management in production (AWS Secrets Manager, HashiCorp Vault, etc.)
- * 3. Rotate API tokens regularly
- * 4. Use least-privilege access for Jenkins API tokens
- * 5. Enable HTTPS for webhook endpoints in production
- * 6. Consider webhook signature verification (HMAC)
- */
-
-// Validate required environment variables
-const requiredEnvVars = ['JENKINS_URL', 'JENKINS_USERNAME', 'JENKINS_API_TOKEN', 'JENKINS_JOB_NAME'];
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
-if (missingVars.length > 0) {
-  logger.error('Missing required environment variables:', missingVars.join(', '));
-  logger.error('Please check your .env file');
-  process.exit(1);
-}
 
 // Initialize Jenkins log capture client
 const jenkinsCapture = new JenkinsLogCapture({
@@ -94,47 +51,9 @@ async function saveWebhookLogs(buildNumber, logs) {
 }
 
 /**
- * Optional: Webhook Signature Verification Middleware
- * 
- * To enable, set WEBHOOK_SECRET in your .env file and configure Jenkins
- * to send a signature header (requires Jenkins plugin or custom script)
- */
-function verifyWebhookSignature(req, res, next) {
-  const webhookSecret = process.env.WEBHOOK_SECRET;
-  
-  // Skip verification if no secret is configured
-  if (!webhookSecret) {
-    return next();
-  }
-  
-  const signature = req.headers['x-webhook-signature'] || req.headers['x-hub-signature-256'];
-  
-  if (!signature) {
-    logger.warn('Webhook signature missing but WEBHOOK_SECRET is configured');
-    return res.status(401).json({ error: 'Signature required' });
-  }
-  
-  try {
-    const hmac = crypto.createHmac('sha256', webhookSecret);
-    const digest = 'sha256=' + hmac.update(req.rawBody).digest('hex');
-    
-    if (signature !== digest) {
-      logger.error('Invalid webhook signature');
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-    
-    logger.debug('Webhook signature verified');
-    next();
-  } catch (error) {
-    logger.error('Error verifying webhook signature:', error);
-    return res.status(500).json({ error: 'Signature verification failed' });
-  }
-}
-
-/**
  * Main webhook endpoint - receives notifications from Jenkins
  */
-app.post('/webhook', verifyWebhookSignature, async (req, res) => {
+app.post('/webhook', async (req, res) => {
   try {
     const notification = req.body;
     
@@ -185,7 +104,7 @@ async function handleWebhook(notification) {
   const taskKey = `${jobName}-${buildNumber}`;
 
   // If build is starting or in progress, start real-time monitoring
-  if (status === 'STARTED' || status === null || status === 'IN_PROGRESS' || status === BUILD_STATUS.BUILDING) {
+  if (status === 'STARTED' || status === null || status === 'IN_PROGRESS') {
     logger.info(`\n📊 Starting real-time log capture for build #${buildNumber}...`);
     
     if (!activeTasks.has(taskKey)) {
@@ -220,8 +139,7 @@ async function handleWebhook(notification) {
     }
   } 
   // If build is already completed, just fetch the logs
-  else if (status === BUILD_STATUS.SUCCESS || status === BUILD_STATUS.FAILURE || 
-           status === BUILD_STATUS.UNSTABLE || status === BUILD_STATUS.ABORTED) {
+  else if (status === 'SUCCESS' || status === 'FAILURE' || status === 'UNSTABLE' || status === 'ABORTED') {
     logger.info(`\n📥 Fetching logs for completed build #${buildNumber}...`);
     
     try {
