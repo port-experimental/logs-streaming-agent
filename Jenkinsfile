@@ -28,7 +28,7 @@ pipeline {
       steps {
         echo '📥 Checking out source code...'
         checkout scm
-        sleep 10
+        sleep 30
       }
     }
     stage('Install'){ steps { sh 'npm ci || npm i' } }
@@ -36,22 +36,22 @@ pipeline {
       steps {
         echo '🧪 Running tests...'
         sh 'npm test'
-        sleep 10
+        sleep 30
       }
     }
     stage('Build'){
       steps {
         echo '🔨 Building application...'
         sh 'npm run build'
-        sleep 10
+        sleep 30
       }
     }
     
     stage('Deploy') {
       steps {
-        sleep 10
+        sleep 30
         echo "Deploying ${params.SERVICE_NAME} v${params.VERSION} to ${params.ENVIRONMENT}..."
-        sleep 10
+        sleep 30
         // Add your actual deployment logic here
         // For example:
         // sh "kubectl set image deployment/${params.SERVICE_NAME} ${params.SERVICE_NAME}=${params.VERSION} -n ${params.ENVIRONMENT}"
