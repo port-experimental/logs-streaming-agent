@@ -20,10 +20,12 @@ This repository contains POC implementations for:
 - **Kafka consumer**: Connect to Port's managed Kafka topics
 - **Action routing**: Route actions to specific handlers based on identifier
 - **Status updates**: Report progress back to Port in real-time
+- **Stage tracking**: Real-time Jenkins pipeline stage visibility in Port status labels
 - **Log streaming**: Add log entries visible in Port UI
 - **Entity linking**: Create/update entities linked to action runs
 - **Error handling**: Graceful error handling with failure reporting
 - **Example handlers**: Pre-built handlers for common actions (deploy, scaffold, scale, etc.)
+- **Jenkins integration**: Trigger builds and stream logs with stage-by-stage progress tracking
 
 ## Quick Start
 
@@ -44,8 +46,6 @@ cp .env.kafka.example .env
 # Run the consumer
 npm run kafka:consumer
 ```
-
-See **[KAFKA-QUICKSTART.md](./KAFKA-QUICKSTART.md)** for complete setup guide.
 
 ---
 
@@ -257,6 +257,64 @@ For completed builds, uses `/job/{jobName}/{buildNumber}/consoleText` to fetch c
 
 ## API Reference
 
+## Jenkins Pipeline Stage Tracking
+
+The Port Kafka consumer includes advanced Jenkins pipeline stage tracking that provides real-time visibility into pipeline execution.
+
+### Features
+
+- **Real-time stage updates**: Polls Jenkins Workflow API every 1 second to detect stage changes
+- **Stage transitions**: Tracks both IN_PROGRESS and completion states for each stage
+- **Status label updates**: Updates Port action run status labels with current stage information
+- **Duration tracking**: Shows how long each stage takes to complete
+- **Continuous monitoring**: Continues polling until build actually completes (not just when logs stop)
+
+### How It Works
+
+1. **Immediate polling**: Starts checking stages immediately when build is triggered
+2. **Fast intervals**: Polls every 1 second to catch quick stage transitions
+3. **Comprehensive tracking**: Uses `getAllStages()` to track all stages including completed ones
+4. **Unique transitions**: Tracks each stage transition (e.g., "Deploy-IN_PROGRESS" and "Deploy-SUCCESS") separately
+5. **Build completion**: Waits for build to fully complete before stopping stage monitoring
+
+### Stage Visibility in Port
+
+When a Jenkins build runs, you'll see status label updates like:
+
+```
+Build #42 - Running: Deployment Info
+Build #42 - Completed: Deployment Info (3s)
+Build #42 - Running: Checkout
+Build #42 - Completed: Checkout (30s)
+Build #42 - Running: Install
+Build #42 - Completed: Install (30s)
+Build #42 - Running: Test
+Build #42 - Completed: Test (30s)
+Build #42 - Running: Build
+Build #42 - Completed: Build (30s)
+Build #42 - Running: Deploy
+Build #42 - Completed: Deploy (30s)
+Build #42 - SUCCESS (2m 45s)
+```
+
+### Pipeline Stage Delays
+
+The included `Jenkinsfile` has configurable `sleep` delays in each stage to make them visible in the Port UI. You can adjust these delays based on your needs:
+
+```groovy
+stage('Checkout') {
+  steps {
+    echo '📥 Checking out source code...'
+    checkout scm
+    sleep 30  // Adjust this value (in seconds)
+  }
+}
+```
+
+**Recommended values:**
+- **Development/Demo**: 10-30 seconds per stage for clear visibility
+- **Production**: Remove or reduce to 1-2 seconds to minimize overhead
+
 ### JenkinsLogCapture Class
 
 You can also use this as a module in your own Node.js applications:
@@ -310,6 +368,30 @@ Streams logs in real-time with a callback for each chunk.
 await capture.streamLogs(42, (chunk) => {
   console.log(chunk);
 }, 2000); // Poll every 2 seconds
+```
+
+##### `getAllStages(buildNumber)`
+Gets all stages for a build from the Jenkins Workflow API.
+
+```javascript
+const stages = await capture.getAllStages(42);
+console.log(stages);
+// [
+//   { name: 'Checkout', status: 'SUCCESS', durationMillis: 2000 },
+//   { name: 'Build', status: 'IN_PROGRESS', durationMillis: null },
+//   { name: 'Deploy', status: 'NOT_EXECUTED', durationMillis: null }
+// ]
+```
+
+**Note**: Requires the [Pipeline: Stage View Plugin](https://plugins.jenkins.io/pipeline-stage-view/) to be installed in Jenkins.
+
+##### `getCurrentStage(buildNumber)`
+Gets the currently running or last completed stage.
+
+```javascript
+const stage = await capture.getCurrentStage(42);
+console.log(stage);
+// { name: 'Build', status: 'IN_PROGRESS', durationMillis: 15000 }
 ```
 
 ##### `getConsoleOutput(buildNumber)`
@@ -400,6 +482,28 @@ No builds found
 - Run at least one build in Jenkins first
 - Verify the job has been executed at least once
 
+### Stage tracking not working
+
+```
+Workflow API not available (404). Install 'Pipeline: Stage View Plugin' in Jenkins.
+```
+
+**Solutions:**
+- Install the **Pipeline: Stage View Plugin** in Jenkins
+  1. Go to Jenkins → Manage Jenkins → Manage Plugins
+  2. Click the "Available" tab
+  3. Search for "Pipeline: Stage View"
+  4. Check the box and click "Install without restart"
+- Verify your pipeline is using declarative or scripted pipeline syntax
+- Ensure the build has at least started (stages won't appear until build begins)
+
+### Stages completing too fast to see
+
+**Solutions:**
+- Add `sleep` delays in your Jenkinsfile stages (see Pipeline Stage Delays section)
+- Reduce the polling interval in `port-kafka-consumer.js` (currently 1 second)
+- Check that the stage tracking is starting immediately (not waiting for first poll)
+
 ## Security Best Practices
 
 - ✅ **Never commit `.env` file** to version control (already in `.gitignore`)
@@ -456,6 +560,7 @@ This application uses the following Jenkins REST API endpoints:
 - `GET /job/{name}/{number}/api/json` - Get build information
 - `GET /job/{name}/{number}/consoleText` - Get complete console output
 - `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
+- `GET /job/{name}/{number}/wfapi/describe` - Get pipeline stage information (requires Pipeline: Stage View Plugin)
 
 ## Error Handling
 
@@ -604,6 +709,8 @@ logger.error('Error occurred', error);
 - Node.js 14+ (for optional chaining support)
 - Jenkins 2.0+ with REST API enabled
 - Valid Jenkins user account with job read permissions
+- **[Pipeline: Stage View Plugin](https://plugins.jenkins.io/pipeline-stage-view/)** (required for stage tracking feature)
+  - Install via Jenkins → Manage Jenkins → Manage Plugins → Available → Search "Pipeline: Stage View"
 
 ## Documentation
 
