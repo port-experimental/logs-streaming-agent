@@ -517,26 +517,41 @@ class PortKafkaConsumer {
 
       let logBuffer = '';
       const CHUNK_SIZE = 500; // Send logs in chunks to avoid overwhelming Port API
-      let currentStage = null;
+      const seenStages = new Set(); // Track which stages we've already reported
 
-      // Start polling for stage changes every 3 seconds
-      const stageCheckInterval = setInterval(async () => {
+      // Function to check and report stages
+      const checkStages = async () => {
         try {
-          const stageInfo = await this.jenkinsCapture.getCurrentStage(buildNumber);
-          if (stageInfo && stageInfo.name !== currentStage) {
-            currentStage = stageInfo.name;
-            const duration = stageInfo.durationMillis ? `(${(stageInfo.durationMillis / 1000).toFixed(0)}s)` : '';
+          const allStages = await this.jenkinsCapture.getAllStages(buildNumber);
+          
+          // Process all stages to find new ones
+          for (const stage of allStages) {
+            const stageKey = `${stage.name}-${stage.status}`;
             
-            await this.updateActionRun(runId, {
-              statusLabel: `Build #${buildNumber} - ${stageInfo.status === STAGE_STATUS.IN_PROGRESS ? 'Running' : 'Completed'}: ${currentStage} ${duration}`.trim(),
-            });
-            
-            logger.info(`Stage: ${currentStage} [${stageInfo.status}]`);
+            // Report each stage transition (when it starts or completes)
+            if (!seenStages.has(stageKey) && stage.status !== 'NOT_EXECUTED') {
+              seenStages.add(stageKey);
+              
+              const duration = stage.durationMillis ? `(${(stage.durationMillis / 1000).toFixed(0)}s)` : '';
+              const statusText = stage.status === STAGE_STATUS.IN_PROGRESS ? 'Running' : 'Completed';
+              
+              await this.updateActionRun(runId, {
+                statusLabel: `Build #${buildNumber} - ${statusText}: ${stage.name} ${duration}`.trim(),
+              });
+              
+              logger.info(`Stage: ${stage.name} [${stage.status}]`);
+            }
           }
         } catch (error) {
           logger.debug(`Stage check error: ${error.message}`);
         }
-      }, 3000);
+      };
+
+      // Check stages immediately (don't wait for first interval)
+      await checkStages();
+
+      // Start polling for stage changes every 1 second (faster to catch quick stages)
+      const stageCheckInterval = setInterval(checkStages, 1000);
 
       try {
         // Stream logs
@@ -554,8 +569,18 @@ class PortKafkaConsumer {
         if (logBuffer.length > 0) {
           await this.addActionRunLog(runId, logBuffer);
         }
+
+        // Continue polling for stages even after log streaming completes
+        // Wait for build to actually finish
+        logger.info('Waiting for build to complete...');
+        let buildComplete = false;
+        while (!buildComplete) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber);
+          buildComplete = buildStatus.building === false;
+        }
       } finally {
-        // Stop polling when streaming completes
+        // Stop polling when build is actually complete
         clearInterval(stageCheckInterval);
       }
 

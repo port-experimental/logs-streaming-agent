@@ -70,6 +70,32 @@ class JenkinsLogCapture {
   }
 
   /**
+   * Get all stages for a build using Jenkins Workflow API
+   */
+  async getAllStages(buildNumber) {
+    try {
+      const response = await this.client.get(
+        `/job/${this.jobName}/${buildNumber}/wfapi/describe`,
+        { timeout: 10000 }
+      );
+      
+      const stages = response.data.stages || [];
+      return stages.map(stage => ({
+        name: stage.name,
+        status: stage.status,
+        durationMillis: stage.durationMillis
+      }));
+    } catch (error) {
+      if (error.response?.status === 404) {
+        logger.error(`Workflow API not available (404). Install 'Pipeline: Stage View Plugin' in Jenkins.`);
+      } else {
+        logger.warn(`Could not get stages info: ${error.message}`);
+      }
+      return [];
+    }
+  }
+
+  /**
    * Get current running stage for a build using Jenkins Workflow API
    */
   async getCurrentStage(buildNumber) {
