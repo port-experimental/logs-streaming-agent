@@ -8,13 +8,16 @@ A **pluggable, TypeScript-based monorepo** for integrating multiple CI/CD provid
 
 ## What This Does
 
-This monorepo provides a **plugin-based architecture** that allows you to:
-
-- **Integrate any CI/CD provider** without modifying core code
-- **Receive webhooks** from CI/CD platforms and stream build logs
-- **Trigger builds** from Port.io self-service actions via Kafka
-- **Stream logs to Port** in real-time
-- **Add new providers** in under 30 minutes
+### Port Kafka Self-Service Actions
+- **Kafka consumer**: Connect to Port's managed Kafka topics
+- **Action routing**: Route actions to specific handlers based on identifier
+- **Status updates**: Report progress back to Port in real-time
+- **Stage tracking**: Real-time Jenkins pipeline stage visibility in Port status labels
+- **Log streaming**: Add log entries visible in Port UI
+- **Entity linking**: Create/update entities linked to action runs
+- **Error handling**: Graceful error handling with failure reporting
+- **Example handlers**: Pre-built handlers for common actions (deploy, scaffold, scale, etc.)
+- **Jenkins integration**: Trigger builds and stream logs with stage-by-stage progress tracking
 
 ## Quick Start
 
@@ -25,7 +28,34 @@ yarn install
 # 2. Build all packages
 yarn build
 
-# 3. Configure environment
+# Run the consumer
+npm run kafka:consumer
+```
+
+---
+
+## Jenkins Log Capture Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Get Jenkins API Token
+
+1. Log into your Jenkins server
+2. Click your name (top right corner) → **Configure**
+3. Scroll to **API Token** section
+4. Click **Add new Token**
+5. Give it a name and click **Generate**
+6. Copy the generated token (you won't be able to see it again!)
+
+### 3. Configure environment variables
+
+Create a `.env` file from the example:
+
+```bash
 cp .env.example .env
 # Edit .env with your credentials
 
@@ -122,18 +152,343 @@ Consumes Port.io actions and triggers builds:
 yarn dev:kafka
 ```
 
-**Example Port Action:**
-```json
-{
-  "action": {
-    "identifier": "trigger_build"
-  },
-  "properties": {
-    "provider": "jenkins",
-    "serviceName": "my-service",
-    "version": "1.0.0",
-    "environment": "production"
+**List only webhook-captured logs:**
+```bash
+curl http://localhost:3000/logs/webhook
+```
+
+**Download a specific log:**
+```bash
+curl http://localhost:3000/logs/webhookstream-testJfrogPipeline-build-47-1699219234567.log
+```
+
+### File Naming Convention
+
+Logs are saved with different prefixes to easily distinguish their source:
+
+- **Webhook logs**: `webhookstream-{job}-build-{number}-{timestamp}.log`
+- **Manual logs**: `{job}-build-{number}-{timestamp}.log`
+
+Example:
+```
+logs/
+├── webhookstream-testJfrogPipeline-build-10-1699219234567.log  ← From webhook
+├── webhookstream-testJfrogPipeline-build-11-1699219456789.log  ← From webhook
+└── testJfrogPipeline-build-9-1699218123456.log                 ← Manual capture
+```
+
+---
+
+## How It Works
+
+### Real-time Streaming
+
+The application uses Jenkins' `progressiveText` API endpoint to fetch logs incrementally:
+
+1. Polls `/job/{jobName}/{buildNumber}/logText/progressiveText?start={position}`
+2. Uses `start` parameter to get only new log content since last request
+3. Checks `X-More-Data` response header to determine if build is still running
+4. Checks `X-Text-Size` header to know the next starting position
+5. Continues polling until build completes (when `X-More-Data` is `false`)
+
+### Post-build Retrieval
+
+For completed builds, uses `/job/{jobName}/{buildNumber}/consoleText` to fetch complete console output in one request.
+
+## API Reference
+
+## Jenkins Pipeline Stage Tracking
+
+The Port Kafka consumer includes advanced Jenkins pipeline stage tracking that provides real-time visibility into pipeline execution.
+
+### Features
+
+- **Real-time stage updates**: Polls Jenkins Workflow API every 1 second to detect stage changes
+- **Stage transitions**: Tracks both IN_PROGRESS and completion states for each stage
+- **Status label updates**: Updates Port action run status labels with current stage information
+- **Duration tracking**: Shows how long each stage takes to complete
+- **Continuous monitoring**: Continues polling until build actually completes (not just when logs stop)
+
+### How It Works
+
+1. **Immediate polling**: Starts checking stages immediately when build is triggered
+2. **Fast intervals**: Polls every 1 second to catch quick stage transitions
+3. **Comprehensive tracking**: Uses `getAllStages()` to track all stages including completed ones
+4. **Unique transitions**: Tracks each stage transition (e.g., "Deploy-IN_PROGRESS" and "Deploy-SUCCESS") separately
+5. **Build completion**: Waits for build to fully complete before stopping stage monitoring
+
+### Stage Visibility in Port
+
+When a Jenkins build runs, you'll see status label updates like:
+
+```
+Build #42 - Running: Deployment Info
+Build #42 - Completed: Deployment Info (3s)
+Build #42 - Running: Checkout
+Build #42 - Completed: Checkout (30s)
+Build #42 - Running: Install
+Build #42 - Completed: Install (30s)
+Build #42 - Running: Test
+Build #42 - Completed: Test (30s)
+Build #42 - Running: Build
+Build #42 - Completed: Build (30s)
+Build #42 - Running: Deploy
+Build #42 - Completed: Deploy (30s)
+Build #42 - SUCCESS (2m 45s)
+```
+
+### Pipeline Stage Delays
+
+The included `Jenkinsfile` has configurable `sleep` delays in each stage to make them visible in the Port UI. You can adjust these delays based on your needs:
+
+```groovy
+stage('Checkout') {
+  steps {
+    echo '📥 Checking out source code...'
+    checkout scm
+    sleep 30  // Adjust this value (in seconds)
   }
+}
+```
+
+**Recommended values:**
+- **Development/Demo**: 10-30 seconds per stage for clear visibility
+- **Production**: Remove or reduce to 1-2 seconds to minimize overhead
+
+### JenkinsLogCapture Class
+
+You can also use this as a module in your own Node.js applications:
+
+```javascript
+const JenkinsLogCapture = require('./jenkins-log-capture');
+
+const capture = new JenkinsLogCapture({
+  jenkinsUrl: 'http://localhost:8080',
+  username: 'your-username',
+  apiToken: 'your-api-token',
+  jobName: 'your-job-name'
+});
+
+// Example: Monitor latest build
+(async () => {
+  const buildNumber = await capture.getLatestBuildNumber();
+  await capture.monitorBuild(buildNumber);
+})();
+```
+
+#### Methods
+
+##### `getLatestBuildNumber()`
+Returns the latest build number for the configured job.
+
+```javascript
+const buildNumber = await capture.getLatestBuildNumber();
+console.log(`Latest build: #${buildNumber}`);
+```
+
+##### `getBuildStatus(buildNumber)`
+Gets detailed status information for a specific build.
+
+```javascript
+const status = await capture.getBuildStatus(42);
+console.log(status);
+// {
+//   number: 42,
+//   result: 'SUCCESS',
+//   building: false,
+//   duration: 45000,
+//   timestamp: 1699219234567
+// }
+```
+
+##### `streamLogs(buildNumber, onLogChunk, pollInterval)`
+Streams logs in real-time with a callback for each chunk.
+
+```javascript
+await capture.streamLogs(42, (chunk) => {
+  console.log(chunk);
+}, 2000); // Poll every 2 seconds
+```
+
+##### `getAllStages(buildNumber)`
+Gets all stages for a build from the Jenkins Workflow API.
+
+```javascript
+const stages = await capture.getAllStages(42);
+console.log(stages);
+// [
+//   { name: 'Checkout', status: 'SUCCESS', durationMillis: 2000 },
+//   { name: 'Build', status: 'IN_PROGRESS', durationMillis: null },
+//   { name: 'Deploy', status: 'NOT_EXECUTED', durationMillis: null }
+// ]
+```
+
+**Note**: Requires the [Pipeline: Stage View Plugin](https://plugins.jenkins.io/pipeline-stage-view/) to be installed in Jenkins.
+
+##### `getCurrentStage(buildNumber)`
+Gets the currently running or last completed stage.
+
+```javascript
+const stage = await capture.getCurrentStage(42);
+console.log(stage);
+// { name: 'Build', status: 'IN_PROGRESS', durationMillis: 15000 }
+```
+
+##### `getConsoleOutput(buildNumber)`
+Gets the complete console output for a build.
+
+```javascript
+const logs = await capture.getConsoleOutput(42);
+console.log(logs);
+```
+
+##### `saveLogsToFile(buildNumber, outputDir)`
+Saves logs to a file in the specified directory.
+
+```javascript
+const filename = await capture.saveLogsToFile(42, './logs');
+console.log(`Saved to: ${filename}`);
+```
+
+##### `monitorBuild(buildNumber, saveToFile)`
+Monitors a build, streams logs, and optionally saves to file.
+
+```javascript
+const result = await capture.monitorBuild(42, true);
+console.log(result.status);
+```
+
+##### `waitForNewBuild(previousBuildNumber, timeout)`
+Waits for a new build to start (useful after triggering a build).
+
+```javascript
+const newBuildNumber = await capture.waitForNewBuild(41, 300000); // 5 min timeout
+console.log(`New build: #${newBuildNumber}`);
+```
+
+## Log Files
+
+Logs are automatically saved to the `./logs/` directory with the following naming format:
+
+```
+{jobName}-build-{buildNumber}-{timestamp}.log
+```
+
+Example: `your-node-app-build-42-1699219234567.log`
+
+## Troubleshooting
+
+### Authentication errors
+
+```
+Error: Failed to get latest build: Request failed with status code 401
+```
+
+**Solutions:**
+- Verify your API token is correct (regenerate if needed)
+- Ensure username matches your Jenkins login exactly
+- Check that the token hasn't expired
+
+### Connection errors
+
+```
+Error: connect ECONNREFUSED 127.0.0.1:8080
+```
+
+**Solutions:**
+- Verify Jenkins server is running and accessible
+- Check firewall/network settings
+- Ensure Jenkins URL includes the correct protocol (`http://` or `https://`)
+- Test the URL in your browser first
+
+### Job not found
+
+```
+Error: Failed to get latest build: Request failed with status code 404
+```
+
+**Solutions:**
+- Verify job name matches exactly (case-sensitive)
+- For jobs in folders, use format: `folder-name/job-name`
+- Check that the job exists and you have permission to access it
+
+### No builds found
+
+```
+No builds found
+```
+
+**Solutions:**
+- Run at least one build in Jenkins first
+- Verify the job has been executed at least once
+
+### Stage tracking not working
+
+```
+Workflow API not available (404). Install 'Pipeline: Stage View Plugin' in Jenkins.
+```
+
+**Solutions:**
+- Install the **Pipeline: Stage View Plugin** in Jenkins
+  1. Go to Jenkins → Manage Jenkins → Manage Plugins
+  2. Click the "Available" tab
+  3. Search for "Pipeline: Stage View"
+  4. Check the box and click "Install without restart"
+- Verify your pipeline is using declarative or scripted pipeline syntax
+- Ensure the build has at least started (stages won't appear until build begins)
+
+### Stages completing too fast to see
+
+**Solutions:**
+- Add `sleep` delays in your Jenkinsfile stages (see Pipeline Stage Delays section)
+- Reduce the polling interval in `port-kafka-consumer.js` (currently 1 second)
+- Check that the stage tracking is starting immediately (not waiting for first poll)
+
+## Security Best Practices
+
+- ✅ **Never commit `.env` file** to version control (already in `.gitignore`)
+- ✅ **Use Jenkins API tokens**, not passwords
+- ✅ **Limit API token permissions** if possible in Jenkins security settings
+- ✅ **Store tokens securely** in production environments (use secrets management)
+- ✅ **Rotate tokens regularly** for better security
+- ✅ **Use HTTPS** for Jenkins URL in production
+
+## Integration Examples
+
+### Trigger build and capture logs
+
+```javascript
+const JenkinsLogCapture = require('./jenkins-log-capture');
+
+const capture = new JenkinsLogCapture({
+  jenkinsUrl: process.env.JENKINS_URL,
+  username: process.env.JENKINS_USERNAME,
+  apiToken: process.env.JENKINS_API_TOKEN,
+  jobName: process.env.JENKINS_JOB_NAME
+});
+
+(async () => {
+  // Get current build number
+  const currentBuild = await capture.getLatestBuildNumber();
+  
+  // Trigger a new build (you'd use Jenkins API for this)
+  // ... trigger build code ...
+  
+  // Wait for new build and monitor it
+  const newBuild = await capture.waitForNewBuild(currentBuild);
+  const result = await capture.monitorBuild(newBuild);
+  
+  console.log(`Build ${result.status.result}`);
+})();
+```
+
+### Capture logs for multiple builds
+
+```javascript
+const builds = [42, 43, 44];
+
+for (const buildNumber of builds) {
+  await capture.saveLogsToFile(buildNumber);
 }
 ```
 
@@ -141,10 +496,11 @@ yarn dev:kafka
 
 When `AUTO_CREATE_ENTITIES=true`, the system automatically creates/updates a Port entity after successful builds:
 
-**What gets created:**
-- **Entity ID**: `{serviceName}-{environment}` (e.g., `my-service-production`)
-- **Blueprint**: Specified by `ENTITY_BLUEPRINT_ID` (default: `microservice`)
-- **Properties**: Build info, version, environment, timestamps, etc.
+- `GET /job/{name}/api/json` - Get job information
+- `GET /job/{name}/{number}/api/json` - Get build information
+- `GET /job/{name}/{number}/consoleText` - Get complete console output
+- `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
+- `GET /job/{name}/{number}/wfapi/describe` - Get pipeline stage information (requires Pipeline: Stage View Plugin)
 
 **Control auto-creation:**
 ```env
@@ -438,7 +794,11 @@ curl -X POST http://localhost:3000/webhook/jenkins \
 
 #### `GET /health`
 
-Health check endpoint.
+- Node.js 14+ (for optional chaining support)
+- Jenkins 2.0+ with REST API enabled
+- Valid Jenkins user account with job read permissions
+- **[Pipeline: Stage View Plugin](https://plugins.jenkins.io/pipeline-stage-view/)** (required for stage tracking feature)
+  - Install via Jenkins → Manage Jenkins → Manage Plugins → Available → Search "Pipeline: Stage View"
 
 **Response:**
 ```json

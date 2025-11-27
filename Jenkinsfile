@@ -24,18 +24,39 @@ pipeline {
       }
     }
     
-    stage('Checkout'){ steps { checkout scm } }
+    stage('Checkout'){
+      steps {
+        echo '📥 Checking out source code...'
+        checkout scm
+        sleep 30
+      }
+    }
     stage('Install'){ steps { sh 'npm ci || npm i' } }
-    stage('Test'){ steps { sh 'npm test' } }
-    stage('Build'){ steps { sh 'npm run build' } }
+    stage('Test'){
+      steps {
+        echo '🧪 Running tests...'
+        sh 'npm test'
+        sleep 30
+      }
+    }
+    stage('Build'){
+      steps {
+        echo '🔨 Building application...'
+        sh 'npm run build'
+        sleep 30
+      }
+    }
     
     stage('Deploy') {
       steps {
+        sleep 30
         echo "Deploying ${params.SERVICE_NAME} v${params.VERSION} to ${params.ENVIRONMENT}..."
+        sleep 30
         // Add your actual deployment logic here
         // For example:
         // sh "kubectl set image deployment/${params.SERVICE_NAME} ${params.SERVICE_NAME}=${params.VERSION} -n ${params.ENVIRONMENT}"
         // sh "helm upgrade ${params.SERVICE_NAME} ./charts --set image.tag=${params.VERSION} --namespace ${params.ENVIRONMENT}"
+        echo '✅ Deployment completed'
       }
     }
   }
