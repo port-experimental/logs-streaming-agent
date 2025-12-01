@@ -10,22 +10,25 @@
     "dev:webhook": "yarn workspace @cicd/webhook-service dev",
     "dev:kafka": "yarn workspace @cicd/kafka-consumer-service dev",
     "test": "yarn workspaces run test",
+    "test:load": "artillery run load-tests/artillery.yml",
+    "test:load:k6": "k6 run load-tests/k6-build-trigger.js",
     "lint": "yarn workspaces run lint",
     "clean": "yarn workspaces run clean && rm -rf node_modules",
     "typecheck": "yarn workspaces run typecheck"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.11",
     "@types/node": "^20.10.0",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.7.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
+    "artillery": "^1.7.0",
     "eslint": "^8.56.0",
-    "prettier": "^3.1.1",
     "jest": "^29.7.0",
-    "@types/jest": "^29.5.11",
-    "ts-jest": "^29.1.1"
+    "prettier": "^3.1.1",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   },
   "engines": {
     "node": ">=18.0.0"
