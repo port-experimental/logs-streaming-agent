@@ -1,20 +1,12 @@
-# Jenkins & Port Integration POC
+# CI/CD Integration Monorepo
 
-This repository contains POC implementations for:
-1. **Jenkins Log Capture** - Real-time log streaming from Jenkins builds
-2. **Port Kafka Self-Service Actions** - Consume and process Port actions via Kafka
+A **pluggable, TypeScript-based monorepo** for integrating multiple CI/CD providers (Jenkins, CircleCI, GitHub Actions, etc.) with Port.io using Yarn workspaces.
 
-## Features
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
+[![Node](https://img.shields.io/badge/Node-%3E%3D18.0-green.svg)](https://nodejs.org/)
+[![Yarn](https://img.shields.io/badge/Yarn-Workspaces-2c8ebb.svg)](https://yarnpkg.com/)
 
-### Jenkins Log Capture
-- **Real-time log streaming**: Monitor builds as they run with progressive text API
-- **Post-build log retrieval**: Fetch complete logs from completed builds
-- **Automatic log saving**: Save logs to files with timestamps
-- **Build monitoring**: Wait for new builds and automatically capture logs
-- **Multiple commands**: Flexible CLI for different use cases
-- **Build status tracking**: Get build results, duration, and timestamps
-- **Webhook integration**: Automatic log capture via Jenkins webhooks (event-driven)
-- **Distinct file naming**: Webhook logs prefixed with `webhookstream-` for easy identification
+## What This Does
 
 ### Port Kafka Self-Service Actions
 - **Kafka consumer**: Connect to Port's managed Kafka topics
@@ -29,19 +21,12 @@ This repository contains POC implementations for:
 
 ## Quick Start
 
-### Jenkins Log Capture
-
-See the [Jenkins sections below](#jenkins-log-capture-setup) for detailed setup.
-
-### Port Kafka Integration
-
 ```bash
-# Install dependencies
-npm install
+# 1. Install dependencies
+yarn install
 
-# Configure Port credentials
-cp .env.kafka.example .env
-# Edit .env with your Port and Kafka credentials
+# 2. Build all packages
+yarn build
 
 # Run the consumer
 npm run kafka:consumer
@@ -72,144 +57,99 @@ Create a `.env` file from the example:
 
 ```bash
 cp .env.example .env
+# Edit .env with your credentials
+
+# 4. Run services
+yarn dev:webhook    # Terminal 1
+yarn dev:kafka      # Terminal 2
 ```
 
-Edit `.env` with your Jenkins details:
+## Packages
+
+| Package | Description | Entry Point |
+|---------|-------------|-------------|
+| **`@cicd/shared`** | Core interfaces, providers, and utilities | `packages/shared/src/index.ts` |
+| **`@cicd/webhook-service`** | Generic webhook server with auto-registration | `packages/webhook-service/src/server.ts` |
+| **`@cicd/kafka-consumer-service`** | Port.io Kafka consumer for action handling | `packages/kafka-consumer-service/src/consumer.ts` |
+
+## Supported Providers
+
+| Provider | Status | Trigger Builds | Stream Logs | Webhooks |
+|----------|--------|----------------|-------------|----------|
+| **Jenkins** | Ready | | | |
+| **CircleCI** | Ready | | | |
+| **GitHub Actions** | Coming Soon | - | - | - |
+| **GitLab CI** | Coming Soon | - | - | - |
+
+## Configuration
+
+### Environment Variables
+
+Create a `.env` file in the root directory:
 
 ```env
-JENKINS_URL=http://your-jenkins-server:8080
-JENKINS_USERNAME=your-username
-JENKINS_API_TOKEN=your-api-token-here
-JENKINS_JOB_NAME=your-node-app
+# Jenkins (optional - only if you want Jenkins support)
+JENKINS_URL=http://localhost:8080
+JENKINS_USERNAME=admin
+JENKINS_API_TOKEN=your-token
+JENKINS_JOB_NAME=your-job
+
+# CircleCI (optional - only if you want CircleCI support)
+CIRCLECI_API_TOKEN=your-token
+CIRCLECI_PROJECT_SLUG=gh/username/repo
+CIRCLECI_WEBHOOK_SECRET=your-secret
+
+# Port.io (required for Kafka consumer)
+PORT_CLIENT_ID=your-client-id
+PORT_CLIENT_SECRET=your-secret
+PORT_ORG_ID=your-org-id
+
+# Kafka (required for Kafka consumer)
+KAFKA_BROKERS=broker1:9092,broker2:9092
+KAFKA_USERNAME=your-username
+KAFKA_PASSWORD=your-password
+KAFKA_CONSUMER_GROUP_ID=your-org-id.consumer-group
+
+# General
 WEBHOOK_PORT=3000
+LOG_LEVEL=info
+NODE_ENV=development
+
+# Port Entity Auto-Creation (optional)
+AUTO_CREATE_ENTITIES=true              # Enable/disable auto-creation after builds
+ENTITY_BLUEPRINT_ID=microservice       # Default blueprint for auto-created entities
 ```
 
-**Note**: For jobs in folders, use format: `folder-name/job-name`
+## 📖 Usage
 
-## Usage
+### Webhook Service
 
-### Two Modes of Operation
-
-This application supports two modes:
-
-1. **Manual Mode**: Run CLI commands to capture logs on-demand
-2. **Webhook Mode**: Automatic log capture when Jenkins sends webhook notifications
-
----
-
-## Manual Mode (CLI)
-
-### Monitor latest build
-
-Captures logs from the most recent build:
+Receives webhooks from CI/CD providers and streams build logs:
 
 ```bash
-npm run capture:latest
-```
+# Start webhook server
+yarn dev:webhook
 
-Or:
-
-```bash
-node jenkins-log-capture.js latest
-```
-
-### Monitor specific build number
-
-Capture logs from a specific build:
-
-```bash
-node jenkins-log-capture.js build 42
-```
-
-### Fetch logs for completed build
-
-Download logs from an already completed build:
-
-```bash
-node jenkins-log-capture.js fetch 42
-```
-
-### Wait for next build and monitor
-
-Waits for a new build to start, then monitors it:
-
-```bash
-npm run capture:wait
-```
-
-Or:
-
-```bash
-node jenkins-log-capture.js wait
-```
-
-This is useful for CI/CD workflows where you trigger a build and want to immediately capture its logs.
-
----
-
-## Webhook Mode (Automatic)
-
-### Start the webhook server
-
-```bash
-npm run webhook:server
-```
-
-The server will start and display:
-
-```
-🚀 Jenkins Webhook Server Started
-==================================================
-📡 Listening on port 3000
-🔗 Webhook URL: http://localhost:3000/webhook
-💚 Health check: http://localhost:3000/health
-📊 Status: http://localhost:3000/status
-📋 All logs: http://localhost:3000/logs
-🔔 Webhook logs: http://localhost:3000/logs/webhook
-==================================================
-
-📝 Log file naming:
-   - Webhook: webhookstream-{job}-build-{number}-{timestamp}.log
-   - Manual:  {job}-build-{number}-{timestamp}.log
-
-⏳ Waiting for Jenkins webhooks...
-```
-
-### Configure Jenkins
-
-The `Jenkinsfile` is already configured to send webhooks. When a build completes, Jenkins will automatically:
-
-1. Send a POST request to `http://host.docker.internal:3000/webhook`
-2. Include build information (job name, build number, status, duration)
-3. Your webhook server receives it and automatically captures the logs
-
-**Note**: `host.docker.internal` allows Docker containers to reach your host machine.
-
-### Install HTTP Request Plugin (if needed)
-
-If Jenkins doesn't have the HTTP Request Plugin:
-
-1. Go to Jenkins → Manage Jenkins → Manage Plugins
-2. Search for "HTTP Request Plugin"
-3. Install and restart Jenkins
-
-### Webhook Endpoints
-
-Once the server is running:
-
-**Health check:**
-```bash
+# Test health endpoint
 curl http://localhost:3000/health
-```
 
-**View active monitors:**
-```bash
+# Check registered providers
 curl http://localhost:3000/status
 ```
 
-**List all logs (webhook + manual):**
+**Webhook Endpoints:**
+- `POST /webhook/jenkins` - Jenkins webhooks
+- `POST /webhook/circleci` - CircleCI webhooks
+- `GET /health` - Health check
+- `GET /status` - Service status
+
+### Kafka Consumer
+
+Consumes Port.io actions and triggers builds:
+
 ```bash
-curl http://localhost:3000/logs
+# Start Kafka consumer
+yarn dev:kafka
 ```
 
 **List only webhook-captured logs:**
@@ -552,9 +492,9 @@ for (const buildNumber of builds) {
 }
 ```
 
-## Jenkins API Endpoints Used
+### Entity Auto-Creation
 
-This application uses the following Jenkins REST API endpoints:
+When `AUTO_CREATE_ENTITIES=true`, the system automatically creates/updates a Port entity after successful builds:
 
 - `GET /job/{name}/api/json` - Get job information
 - `GET /job/{name}/{number}/api/json` - Get build information
@@ -562,149 +502,297 @@ This application uses the following Jenkins REST API endpoints:
 - `GET /job/{name}/{number}/logText/progressiveText` - Stream logs progressively
 - `GET /job/{name}/{number}/wfapi/describe` - Get pipeline stage information (requires Pipeline: Stage View Plugin)
 
-## Error Handling
+**Control auto-creation:**
+```env
+# Enable auto-creation (default: false)
+AUTO_CREATE_ENTITIES=true
 
-This application implements comprehensive error handling across all components to ensure reliability and resilience.
+# Specify blueprint (default: microservice)
+ENTITY_BLUEPRINT_ID=microservice
+```
 
-### **Retry Logic**
+**Override per action:**
+```json
+{
+  "properties": {
+    "serviceName": "my-service",
+    "version": "2.0.0",
+    "environment": "production",
+    "blueprintId": "custom-blueprint",
+    "entityIdentifier": "custom-id",
+    "entityProperties": {
+      "custom_field": "value"
+    }
+  }
+}
+```
 
-**Global Axios Retry (All HTTP Requests):**
-- Centralized retry configuration via `axios-config.js`
-- **3 automatic retries** with exponential backoff (1s, 2s, 4s)
-- Retries on:
-  - Network errors (ECONNRESET, ETIMEDOUT, ECONNREFUSED, ENOTFOUND)
-  - Server errors (5xx status codes)
-  - Idempotent request errors
-- Detailed logging of retry attempts with URL, method, and error details
-- Applied to **all** API calls:
-  - Port API (authentication, action runs, entity updates)
-  - Jenkins API (build status, log retrieval, build triggers)
+**Manual entity creation:**
+```json
+{
+  "action": {
+    "identifier": "create_entity"
+  },
+  "properties": {
+    "blueprintId": "microservice",
+    "title": "User Service",
+    "identifier": "user-service-prod",
+    "entityProperties": {
+      "service_name": "user-service",
+      "version": "1.0.0",
+      "environment": "production"
+    }
+  }
+}
+```
 
-**Port API Calls:**
-- Token refresh on expiration (55-minute cache)
-- Error logging with context for all API failures
-- Graceful degradation when Port API is unavailable
+## Development
 
-**Jenkins Log Streaming:**
-- Max consecutive error tracking (stops after 5 consecutive failures)
-- Prevents infinite loops during persistent connection issues
+### Available Commands
 
-**Kafka Consumer:**
-- Built-in retry configuration for Kafka connections
-- Automatic reconnection on consumer crash (up to 5 attempts)
-- Exponential backoff for reconnection attempts
-- Connection state tracking
+```bash
+# Build all packages
+yarn build
 
-### **Error Handlers**
+# Run services in dev mode (auto-reload)
+yarn dev:webhook
+yarn dev:kafka
 
-**Global Process Handlers:**
-- `uncaughtException` - Logs and gracefully shuts down
-- `unhandledRejection` - Logs and gracefully shuts down
-- `SIGTERM` / `SIGINT` - Graceful shutdown with cleanup
+# Type check all packages
+yarn typecheck
 
-**Webhook Server:**
-- Global Express error handler
-- 404 handler for unknown routes
-- Input validation for webhook payloads
-- Directory traversal protection for file access
-- Try-catch blocks around all file operations
-- Server error handling (port in use, etc.)
+# Clean build artifacts
+yarn clean
 
-**Kafka Consumer:**
-- Consumer crash detection and auto-reconnection
-- Network timeout handling
-- Message processing errors don't stop the consumer
-- Connection state monitoring
+# Build specific package
+yarn workspace @cicd/shared build
+```
 
-**Jenkins Integration:**
-- HTTP timeout configuration (30s default)
-- Retry with exponential backoff
-- Stream error recovery
-- Build status validation
+### Project Structure
 
-### **Validation**
+```
+your-node-app/
+├── packages/
+│   ├── shared/                  # @cicd/shared
+│   │   ├── src/
+│   │   │   ├── core/            # Plugin system
+│   │   │   ├── providers/       # CI/CD providers
+│   │   │   └── utils/           # Shared utilities
+│   │   └── package.json
+│   │
+│   ├── webhook-service/         # @cicd/webhook-service
+│   │   ├── src/
+│   │   │   └── server.ts
+│   │   └── package.json
+│   │
+│   └── kafka-consumer-service/  # @cicd/kafka-consumer-service
+│       ├── src/
+│       │   ├── consumer.ts
+│       │   └── handlers/
+│       └── package.json
+│
+├── .env                         # Environment variables
+├── package.json                 # Root workspace config
+└── tsconfig.json                # Root TypeScript config
+```
 
-**Configuration Validation:**
-- All required environment variables checked on startup
-- Kafka broker format validation (host:port)
-- Clear error messages with setup instructions
-- Fails fast with detailed error output
+## ➕ Adding a New Provider
 
-**Input Validation:**
-- Webhook payload validation (required fields)
-- Filename validation (prevent directory traversal)
-- Build number validation
-- Parameter type checking
+### Step 1: Create Provider Class
 
-### **Graceful Degradation**
+Create `packages/shared/src/providers/your-provider/YourProvider.ts`:
 
-- Failed messages don't crash the consumer
-- Individual action failures are reported to Port
-- Log capture continues even if file save fails
-- Webhook processing is async (doesn't block response)
+```typescript
+import { CIProviderInterface } from '../../core/CIProviderInterface';
+import { BuildInfo, BuildStatusInfo } from '../../core/types';
 
-### **Monitoring & Observability**
+export class YourProvider extends CIProviderInterface {
+  getName() { return 'your-provider'; }
+  
+  validateConfig() {
+    // Validate configuration
+  }
+  
+  async triggerBuild(parameters) {
+    // Trigger build logic
+  }
+  
+  async getBuildStatus(buildId) {
+    // Get build status
+  }
+  
+  async streamLogs(buildId, onLogChunk) {
+    // Stream logs in real-time
+  }
+  
+  async getCompleteLogs(buildId) {
+    // Get complete logs
+  }
+  
+  parseWebhookPayload(payload) {
+    // Parse webhook payload
+  }
+}
+```
 
-- Structured logging with context
-- Error logs include stack traces
-- Connection state tracking
-- Health check endpoints
-- Active task monitoring
+### Step 2: Export Provider
+
+Add to `packages/shared/src/index.ts`:
+
+```typescript
+export * from './providers/your-provider/YourProvider';
+```
+
+### Step 3: Add Environment Variables
+
+```env
+YOUR_PROVIDER_API_TOKEN=token
+YOUR_PROVIDER_PROJECT=project
+```
+
+### Step 4: Auto-Registration
+
+Add to both services (webhook and Kafka consumer):
+
+```typescript
+if (process.env.YOUR_PROVIDER_API_TOKEN) {
+  pluginRegistry.register(YourProvider, {
+    apiToken: process.env.YOUR_PROVIDER_API_TOKEN,
+    project: process.env.YOUR_PROVIDER_PROJECT,
+  });
+}
+```
+
+**That's it!** Your provider is now available in both services.
+
+## Error Handling & Retry Logic
+
+### HTTP Retry (All API Calls)
+
+Automatic retry with exponential backoff:
+- **Retries:** 3 attempts
+- **Backoff:** 1s, 2s, 4s
+- **Conditions:** Network errors, 5xx responses, timeouts
+
+### Kafka Reconnection
+
+Automatic reconnection on failure:
+- **Retries:** 5 attempts
+- **Backoff:** Exponential (5s, 10s, 15s, etc.)
+- **Graceful shutdown:** On max retries
+
+### Log Streaming Retry
+
+Consecutive error tracking:
+- **Max errors:** 5 consecutive failures
+- **Retry delay:** 2 seconds
+- **Fail-safe:** Throws after max attempts
 
 ## Logging
 
-This application uses [Winston](https://github.com/winstonjs/winston) for structured logging with multiple transports.
+Winston-based logging with multiple transports:
 
-### Log Levels
+```typescript
+logger.info('Info message');
+logger.warn('Warning message');
+logger.error('Error message');
+logger.debug('Debug message');
+```
 
-- `error` - Error messages (red)
-- `warn` - Warning messages (yellow)
-- `info` - Informational messages (green) - **default**
-- `http` - HTTP request logs (magenta)
-- `debug` - Detailed debug information (blue)
+**Log Outputs:**
+- **Console:** Colorized, timestamped
+- **`logs/error.log`:** Errors only
+- **`logs/combined.log`:** All logs
 
-### Log Outputs
+**Configuration:**
+```env
+LOG_LEVEL=info  # debug | info | warn | error
+```
 
-Logs are written to multiple destinations:
+## 🚢 Deployment
 
-1. **Console** - Colorized output with timestamps
-2. **logs/error.log** - JSON format, errors only
-3. **logs/combined.log** - JSON format, all log levels
+### Docker
 
-### Configuration
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json yarn.lock ./
+COPY packages ./packages
+RUN yarn install --frozen-lockfile
+RUN yarn build
+CMD ["node", "packages/webhook-service/dist/server.js"]
+```
 
-Set the log level via environment variable:
+### Kubernetes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-service
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+      - name: webhook-service
+        image: your-registry/webhook-service:latest
+        envFrom:
+        - secretRef:
+            name: ci-secrets
+```
+
+## Troubleshooting
+
+### Build Errors
 
 ```bash
-# In .env file
-LOG_LEVEL=debug  # Options: error, warn, info, http, debug
+yarn clean
+yarn install
+yarn build
 ```
 
-Default level is `info` if not specified.
+### Provider Not Registered
 
-### Log Files Location
-
-```
-logs/
-├── error.log       # Errors only (JSON)
-├── combined.log    # All logs (JSON)
-└── *.log          # Jenkins build logs
+Check environment variables are set:
+```bash
+echo $JENKINS_URL
+echo $CIRCLECI_API_TOKEN
 ```
 
-### Example Usage
+### Webhook Not Working
 
-The logger is automatically used throughout the application:
+1. Check provider is registered: `curl http://localhost:3000/status`
+2. Verify webhook URL format: `/webhook/{provider}`
+3. Check logs for errors
 
-```javascript
-const logger = require('./logger');
+### Kafka Consumer Not Connecting
 
-logger.info('Application started');
-logger.debug('Debug information', { metadata: 'value' });
-logger.warn('Warning message');
-logger.error('Error occurred', error);
+1. Verify Kafka credentials
+2. Check broker addresses are reachable
+3. Ensure consumer group ID format is correct
+4. Review consumer logs
+
+## API Reference
+
+### Webhook Endpoints
+
+#### `POST /webhook/{provider}`
+
+Receive webhook from CI/CD provider.
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/webhook/jenkins \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jobName": "my-job",
+    "buildNumber": 42,
+    "status": "SUCCESS"
+  }'
 ```
 
-## Requirements
+#### `GET /health`
 
 - Node.js 14+ (for optional chaining support)
 - Jenkins 2.0+ with REST API enabled
@@ -712,20 +800,48 @@ logger.error('Error occurred', error);
 - **[Pipeline: Stage View Plugin](https://plugins.jenkins.io/pipeline-stage-view/)** (required for stage tracking feature)
   - Install via Jenkins → Manage Jenkins → Manage Plugins → Available → Search "Pipeline: Stage View"
 
-## Documentation
+**Response:**
+```json
+{
+  "status": "healthy",
+  "activeMonitors": 0,
+  "registeredProviders": ["jenkins", "circleci"],
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+```
 
-### Jenkins Integration
-- **[WEBHOOK-WORKFLOW.md](./WEBHOOK-WORKFLOW.md)** - Detailed webhook workflow, event sequence, and data capture documentation
+#### `GET /status`
 
-### Port Kafka Integration
-- **[KAFKA-README.md](./KAFKA-README.md)** - Port Kafka SSA POC overview
-- **[KAFKA-QUICKSTART.md](./KAFKA-QUICKSTART.md)** - Get started in 5 minutes
-- **[PORT-KAFKA-POC.md](./PORT-KAFKA-POC.md)** - Complete POC documentation with architecture, workflows, and API details
+Service status and active tasks.
+
+**Response:**
+```json
+{
+  "activeTasks": [],
+  "count": 0,
+  "providers": ["jenkins", "circleci"],
+  "uptime": 123.456
+}
+```
+
+## 🤝 Contributing
+
+1. Create a new provider following the guide above
+2. Implement the `CIProviderInterface`
+3. Export from `packages/shared/src/index.ts`
+4. Add environment variables to `.env.example`
+5. Update this README
 
 ## License
 
 ISC
 
-## Contributing
+## Acknowledgments
 
-Feel free to submit issues and enhancement requests!
+- Built with TypeScript, Yarn Workspaces, and Express
+- Integrates with Port.io for self-service actions
+- Supports multiple CI/CD providers through a plugin system
+
+---
+
+**Made for DevOps teams**

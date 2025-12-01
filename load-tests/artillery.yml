@@ -1,0 +1,60 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 60
+      arrivalRate: 10  # 10 requests per second
+      name: "Warm up"
+    - duration: 120
+      arrivalRate: 50  # 50 requests per second
+      name: "Sustained load"
+    - duration: 60
+      arrivalRate: 100 # 100 requests per second
+      name: "Peak load"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+scenarios:
+  - name: "Trigger Build Action"
+    flow:
+      - post:
+          url: "/webhook/jenkins"
+          json:
+            context:
+              runId: "{{ $randomString() }}"
+              by:
+                email: "load-test@example.com"
+            action:
+              identifier: "deploy_microservice_kafka"
+            properties:
+              serviceName: "load-test-service"
+              version: "1.0.0"
+              environment: "dev"
+              branch: "main"
+          capture:
+            - json: "$.runId"
+              as: "runId"
+      - think: 1
+      - get:
+          url: "/webhook/status/{{ runId }}"
+          expect:
+            - statusCode: 200
+
+  - name: "Concurrent Build Triggers"
+    weight: 30
+    flow:
+      - post:
+          url: "/webhook/jenkins"
+          json:
+            context:
+              runId: "{{ $randomString() }}"
+              by:
+                email: "load-test@example.com"
+            action:
+              identifier: "deploy_microservice_kafka"
+            properties:
+              serviceName: "service-{{ $randomString() }}"
+              version: "{{ $randomInt(1, 10) }}.0.0"
+              environment: "{{ $pick(['dev', 'staging', 'prod']) }}"
+              branch: "main"
+

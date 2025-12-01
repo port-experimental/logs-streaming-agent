@@ -4,9 +4,17 @@
 # Dependencies
 node_modules/
 
+# Build output
+dist/
+*.tsbuildinfo
+
 # Logs
 logs/
 *.log
+
+# Test coverage
+coverage/
+.nyc_output/
 
 # OS files
 .DS_Store

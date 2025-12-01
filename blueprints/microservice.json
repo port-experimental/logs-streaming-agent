@@ -1,0 +1,83 @@
+{
+  "identifier": "microservice",
+  "title": "Microservice",
+  "icon": "Microservice",
+  "schema": {
+    "properties": {
+      "service_name": {
+        "type": "string",
+        "title": "Service Name",
+        "description": "Name of the microservice"
+      },
+      "version": {
+        "type": "string",
+        "title": "Version",
+        "description": "Current version",
+        "pattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "environment": {
+        "type": "string",
+        "title": "Environment",
+        "enum": ["dev", "staging", "production"],
+        "enumColors": {
+          "dev": "blue",
+          "staging": "yellow",
+          "production": "green"
+        }
+      },
+      "language": {
+        "type": "string",
+        "title": "Programming Language",
+        "enum": ["Node.js", "Python", "Java", "Go", "Ruby", ".NET"]
+      },
+      "repository_url": {
+        "type": "string",
+        "title": "Repository URL",
+        "format": "url"
+      },
+      "health_status": {
+        "type": "string",
+        "title": "Health Status",
+        "enum": ["Healthy", "Degraded", "Down", "Unknown"],
+        "enumColors": {
+          "Healthy": "green",
+          "Degraded": "yellow",
+          "Down": "red",
+          "Unknown": "gray"
+        }
+      },
+      "replicas": {
+        "type": "number",
+        "title": "Replicas",
+        "description": "Number of running instances",
+        "minimum": 0
+      },
+      "cpu_usage": {
+        "type": "number",
+        "title": "CPU Usage (%)",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "memory_usage": {
+        "type": "number",
+        "title": "Memory Usage (%)",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "last_deployed": {
+        "type": "string",
+        "title": "Last Deployed",
+        "format": "date-time"
+      }
+    },
+    "required": ["service_name", "version", "environment"]
+  },
+  "relations": {
+    "vm": {
+      "title": "Runs On",
+      "target": "vm",
+      "many": false,
+      "required": false
+    }
+  }
+}
