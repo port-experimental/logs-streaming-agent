@@ -714,13 +714,6 @@ logger.error('Error occurred', error);
 
 ## Documentation
 
-### Jenkins Integration
-- **[WEBHOOK-WORKFLOW.md](./WEBHOOK-WORKFLOW.md)** - Detailed webhook workflow, event sequence, and data capture documentation
-
-### Port Kafka Integration
-- **[KAFKA-README.md](./KAFKA-README.md)** - Port Kafka SSA POC overview
-- **[KAFKA-QUICKSTART.md](./KAFKA-QUICKSTART.md)** - Get started in 5 minutes
-- **[PORT-KAFKA-POC.md](./PORT-KAFKA-POC.md)** - Complete POC documentation with architecture, workflows, and API details
 
 ## License
 
