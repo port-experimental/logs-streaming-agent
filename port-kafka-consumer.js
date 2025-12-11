@@ -3,6 +3,18 @@
  * 
  * This POC demonstrates how to consume action invocations from Port's Kafka topic
  * and report status back to Port.
+ * 
+ * Features:
+ * - Generic parameter pass-through: Any properties defined in Port actions are
+ *   automatically passed to Jenkins as build parameters
+ * - Flexible action handling: Add custom handlers for specific actions or use
+ *   the default generic deployment handler
+ * - Real-time Jenkins log streaming to Port
+ * 
+ * Usage:
+ * 1. Define your action in Port with any properties you need
+ * 2. Properties will be automatically converted to UPPERCASE and sent to Jenkins
+ * 3. Jenkins job receives all parameters and can use them as needed
  */
 
 const { Kafka } = require('kafkajs');
@@ -368,21 +380,27 @@ class PortKafkaConsumer {
     logger.info('🔧 Executing action handler...');
     logger.debug('📋 Action Properties:', JSON.stringify(properties, null, 2));
 
-    // Example: Handle different action types
+    // Handle different action types
+    // Add your custom action handlers here
     switch (action.identifier) {
       case 'create_vm':
         await this.handleCreateVM(message);
         break;
       
+      // Generic deployment handler - works with any Jenkins job
       case 'deploy_service':
       case 'deploy_microservice_kafka':
+      case 'deploy_application':
+      case 'trigger_build':
         await this.handleDeployService(message);
         break;
       
       default:
-        logger.warn(`⚠️  No specific handler for action: ${action.identifier}`);
-        logger.info('📝 Using default handler (logging only)');
-        await this.addActionRunLog(runId, `Received action: ${action.identifier} with properties: ${JSON.stringify(properties)}`);
+        // Default: Try to use the generic deployment handler
+        // This allows any action to trigger Jenkins with parameters
+        logger.info(`ℹ️  No specific handler for action: ${action.identifier}`);
+        logger.info('📝 Using generic deployment handler');
+        await this.handleDeployService(message);
     }
   }
 
@@ -471,33 +489,50 @@ class PortKafkaConsumer {
 
   /**
    * Handle service deployment with Jenkins integration
+   * Generic handler that passes all Port properties to Jenkins
+   * 
+   * Example:
+   * Port action with properties: { branch: "main", tag: "v1.0", replicas: 3, enableDebug: true }
+   * Will send to Jenkins: { BRANCH: "main", TAG: "v1.0", REPLICAS: 3, ENABLEDEBUG: true, PORT_RUN_ID: "..." }
+   * 
+   * Works with ANY properties - no specific parameters required.
+   * Define whatever your Jenkins job needs in your Port action configuration.
    */
   async handleDeployService(message) {
     const runId = message.context.runId;
     const props = message.properties;
     const entity = message.entity;
 
-    await this.addActionRunLog(runId, '🚀 Starting service deployment via Jenkins...');
-    
-    const serviceName = props.serviceName || props.service_name || 'service';
-    const version = props.version || '1.0.0';
-    const environment = props.environment || 'dev';
-    const changeReason = props.changeReason || 'Deployment triggered via Port';
-    
-    await this.addActionRunLog(runId, `Deploying ${serviceName} v${version} to ${environment}...`);
-    await this.addActionRunLog(runId, `Reason: ${changeReason}`);
+    await this.addActionRunLog(runId, '🚀 Starting Jenkins build via Port...');
+    await this.addActionRunLog(runId, `Action: ${message.action.identifier}`);
+    await this.addActionRunLog(runId, `Parameters: ${JSON.stringify(props, null, 2)}`);
 
     try {
-      // Step 1: Trigger Jenkins build
+      // Step 1: Trigger Jenkins build with all parameters from Port
       await this.addActionRunLog(runId, 'Triggering Jenkins build...');
       
-      const buildNumber = await this.triggerJenkinsBuild({
-        SERVICE_NAME: serviceName,
-        VERSION: version,
-        ENVIRONMENT: environment,
-        CHANGE_REASON: changeReason,
-        PORT_RUN_ID: runId,
-      });
+      // Build parameters - pass ALL properties from Port to Jenkins
+      // This makes it flexible for any action configuration in Port
+      const buildParameters = {};
+      
+      // Convert all Port properties to Jenkins parameters
+      for (const [key, value] of Object.entries(props)) {
+        if (value !== undefined && value !== null) {
+          // Convert property names to Jenkins convention (optional)
+          // You can customize this transformation based on your needs:
+          // - Keep original: buildParameters[key] = value;
+          // - Or convert to UPPER_CASE for Jenkins convention
+          const jenkinsKey = key.toUpperCase();
+          buildParameters[jenkinsKey] = value;
+        }
+      }
+      
+      // Always add run ID for tracking
+      buildParameters.PORT_RUN_ID = runId;
+      
+      logger.info('📋 Sending parameters to Jenkins:', JSON.stringify(buildParameters, null, 2));
+      
+      const buildNumber = await this.triggerJenkinsBuild(buildParameters);
 
       const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
       const jobName = this.jenkinsCapture.jobName;
@@ -599,7 +634,7 @@ class PortKafkaConsumer {
       if (isSuccess) {
         await this.addActionRunLog(
           runId,
-          `Successfully deployed ${serviceName} v${version} to ${environment}!\nBuild #${buildNumber} completed in ${duration}s`
+          `✅ Jenkins build #${buildNumber} completed successfully in ${duration}s`
         );
       } else {
         throw new Error(`Jenkins build failed with status: ${buildStatus.result}`);
