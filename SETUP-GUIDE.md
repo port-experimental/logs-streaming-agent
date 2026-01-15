@@ -108,6 +108,11 @@ Navigate to **Self-Service** → **Actions** → **Create Action**
 ```json
 {
   "properties": {
+    "job_name": {
+      "type": "string",
+      "title": "Jenkins Job",
+      "description": "Jenkins pipeline job to trigger (optional - defaults to JENKINS_JOB_NAME env var)"
+    },
     "serviceName": {
       "type": "string",
       "title": "Service Name",
@@ -133,6 +138,8 @@ Navigate to **Self-Service** → **Actions** → **Create Action**
   "required": ["serviceName", "version", "environment"]
 }
 ```
+
+> **Note:** The `job_name` property allows users to specify which Jenkins pipeline to trigger. If omitted, the service uses the `JENKINS_JOB_NAME` environment variable. This enables a single consumer to trigger multiple different Jenkins jobs.
 
 ### 1.3 Get Port Credentials
 
@@ -215,7 +222,7 @@ KAFKA_SASL_PASSWORD=your_kafka_password
 JENKINS_URL=http://your-jenkins-server:8080
 JENKINS_USERNAME=your-jenkins-username
 JENKINS_API_TOKEN=your-jenkins-api-token
-JENKINS_JOB_NAME=your-pipeline-job-name
+JENKINS_JOB_NAME=your-default-pipeline-job-name  # Can be overridden per action via job_name property
 
 # ============================================
 # Webhook Server (Optional)
@@ -257,6 +264,25 @@ The service will:
 - Subscribe to Port action topics
 - Wait for action invocations
 - Process actions and update Port in real-time
+- Handle multiple concurrent builds in parallel
+
+### 2.5 Dynamic Job Names (Optional)
+
+The service supports triggering **different Jenkins jobs** per action. Users can specify `job_name` in their Port action properties:
+
+```json
+{
+  "job_name": "deploy-frontend",
+  "version": "1.0.0",
+  "environment": "prod"
+}
+```
+
+**How it works:**
+- If `job_name` is provided in action properties → triggers that specific Jenkins job
+- If `job_name` is omitted → falls back to `JENKINS_JOB_NAME` env var
+- Multiple actions can run **concurrently**, each triggering different jobs
+- Each build streams its own logs and reports status independently
 
 ---
 
@@ -548,7 +574,7 @@ npm run capture:wait
 - [ ] `JENKINS_URL`
 - [ ] `JENKINS_USERNAME`
 - [ ] `JENKINS_API_TOKEN`
-- [ ] `JENKINS_JOB_NAME`
+- [ ] `JENKINS_JOB_NAME` (optional if using `job_name` property in actions)
 
 ---
 

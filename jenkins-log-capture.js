@@ -59,12 +59,13 @@ class JenkinsLogCapture {
   /**
    * Get the latest build number for a job
    */
-  async getLatestBuildNumber() {
+  async getLatestBuildNumber(jobName = null) {
+    const job = jobName || this.jobName;
     try {
-      const response = await this.client.get(`/job/${this.jobName}/api/json`);
+      const response = await this.client.get(`/job/${job}/api/json`);
       return response.data.lastBuild?.number || null;
     } catch (error) {
-      logger.error(`Failed to get latest build: ${error.message}`);
+      logger.error(`Failed to get latest build for ${job}: ${error.message}`);
       throw new Error(`Failed to get latest build: ${error.message}`);
     }
   }
@@ -72,10 +73,11 @@ class JenkinsLogCapture {
   /**
    * Get all stages for a build using Jenkins Workflow API
    */
-  async getAllStages(buildNumber) {
+  async getAllStages(buildNumber, jobName = null) {
+    const job = jobName || this.jobName;
     try {
       const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/wfapi/describe`,
+        `/job/${job}/${buildNumber}/wfapi/describe`,
         { timeout: 10000 }
       );
       
@@ -98,10 +100,11 @@ class JenkinsLogCapture {
   /**
    * Get current running stage for a build using Jenkins Workflow API
    */
-  async getCurrentStage(buildNumber) {
+  async getCurrentStage(buildNumber, jobName = null) {
+    const job = jobName || this.jobName;
     try {
       const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/wfapi/describe`,
+        `/job/${job}/${buildNumber}/wfapi/describe`,
         { timeout: 10000 }
       );
       
@@ -151,10 +154,11 @@ class JenkinsLogCapture {
   /**
    * Get build status
    */
-  async getBuildStatus(buildNumber) {
+  async getBuildStatus(buildNumber, jobName = null) {
+    const job = jobName || this.jobName;
     try {
       const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/api/json`
+        `/job/${job}/${buildNumber}/api/json`
       );
       return {
         number: response.data.number,
@@ -172,8 +176,13 @@ class JenkinsLogCapture {
   /**
    * Stream logs in real-time (progressive text)
    * This fetches logs incrementally as the build runs
+   * @param {number} buildNumber - Build number to stream logs for
+   * @param {function} onLogChunk - Callback for each log chunk
+   * @param {number} pollInterval - Polling interval in ms
+   * @param {string} jobName - Optional job name (defaults to constructor value)
    */
-  async streamLogs(buildNumber, onLogChunk, pollInterval = 2000) {
+  async streamLogs(buildNumber, onLogChunk, pollInterval = 2000, jobName = null) {
+    const job = jobName || this.jobName;
     let start = 0;
     let isBuilding = true;
     let consecutiveErrors = 0;
@@ -185,7 +194,7 @@ class JenkinsLogCapture {
       try {
         // Use progressiveText API for incremental log retrieval
         const response = await this.client.get(
-          `/job/${this.jobName}/${buildNumber}/logText/progressiveText?start=${start}`,
+          `/job/${job}/${buildNumber}/logText/progressiveText?start=${start}`,
           { responseType: 'text' }
         );
 
@@ -233,10 +242,11 @@ class JenkinsLogCapture {
    * Get complete console output for a build
    * Use this for completed builds
    */
-  async getConsoleOutput(buildNumber) {
+  async getConsoleOutput(buildNumber, jobName = null) {
+    const job = jobName || this.jobName;
     try {
       const response = await this.client.get(
-        `/job/${this.jobName}/${buildNumber}/consoleText`,
+        `/job/${job}/${buildNumber}/consoleText`,
         { responseType: 'text' }
       );
       return response.data;

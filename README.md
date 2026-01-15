@@ -26,6 +26,8 @@ This repository contains POC implementations for:
 - **Error handling**: Graceful error handling with failure reporting
 - **Example handlers**: Pre-built handlers for common actions (deploy, scaffold, scale, etc.)
 - **Jenkins integration**: Trigger builds and stream logs with stage-by-stage progress tracking
+- **Dynamic job names**: Trigger any Jenkins job by passing `job_name` in action properties
+- **Concurrent builds**: Multiple Jenkins builds can run in parallel from different actions
 
 ## Quick Start
 
@@ -256,6 +258,59 @@ The application uses Jenkins' `progressiveText` API endpoint to fetch logs incre
 For completed builds, uses `/job/{jobName}/{buildNumber}/consoleText` to fetch complete console output in one request.
 
 ## API Reference
+
+## Dynamic Jenkins Job Names
+
+The consumer supports triggering **different Jenkins jobs** based on Port action properties. This allows a single consumer instance to manage multiple pipelines.
+
+### Specifying the Job Name
+
+Pass `job_name` (or `jobName` or `jenkins_job`) in your Port action properties:
+
+```json
+{
+  "job_name": "deploy-frontend",
+  "branch": "main",
+  "environment": "production"
+}
+```
+
+The `job_name` property is used for routing and won't be passed to Jenkins as a build parameter. All other properties are converted to UPPERCASE and sent to Jenkins.
+
+### Fallback Behavior
+
+If no `job_name` is provided in the action properties, the consumer falls back to the `JENKINS_JOB_NAME` environment variable.
+
+### Concurrent Builds
+
+Multiple actions can trigger different Jenkins jobs simultaneously. Each build:
+- Runs independently in parallel
+- Streams its own logs to Port
+- Reports its own status back to Port
+- Has its own stage tracking
+
+### Example: Multiple Actions
+
+**Action 1** (triggered at 10:00:00):
+```json
+{
+  "job_name": "deploy-frontend",
+  "branch": "main"
+}
+```
+
+**Action 2** (triggered at 10:00:05):
+```json
+{
+  "job_name": "deploy-backend",
+  "branch": "main",
+  "replicas": 3
+}
+```
+
+Both builds will run concurrently, each with independent log streaming and status reporting.
+
+---
 
 ## Jenkins Pipeline Stage Tracking
 

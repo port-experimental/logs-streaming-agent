@@ -436,17 +436,23 @@ class PortKafkaConsumer {
 
   /**
    * Trigger Jenkins build with parameters
+   * @param {Object} parameters - Build parameters to pass to Jenkins
+   * @param {string} jobName - Optional job name (defaults to JENKINS_JOB_NAME env var)
    */
-  async triggerJenkinsBuild(parameters = {}) {
+  async triggerJenkinsBuild(parameters = {}, jobName = null) {
     const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
-    const jobName = this.jenkinsCapture.jobName;
+    const job = jobName || this.jenkinsCapture.jobName;
     const auth = {
       username: this.jenkinsCapture.username,
       password: this.jenkinsCapture.apiToken,
     };
 
+    if (!job) {
+      throw new Error('No Jenkins job name specified. Provide job_name in action properties or set JENKINS_JOB_NAME env var');
+    }
+
     try {
-      logger.info(`🔨 Triggering Jenkins build for job: ${jobName}`);
+      logger.info(`🔨 Triggering Jenkins build for job: ${job}`);
       
       const hasParameters = parameters && Object.keys(parameters).length > 0;
       
@@ -456,7 +462,7 @@ class PortKafkaConsumer {
       
       // Use buildWithParameters endpoint if parameters exist, otherwise use build
       const endpoint = hasParameters ? 'buildWithParameters' : 'build';
-      const url = `${jenkinsUrl}/job/${jobName}/${endpoint}`;
+      const url = `${jenkinsUrl}/job/${job}/${endpoint}`;
       
       // Trigger build with parameters as query string
       await axios.post(
@@ -472,18 +478,18 @@ class PortKafkaConsumer {
       logger.info('⏳ Waiting for build to be queued...');
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Get the latest build number
-      const latestBuild = await this.jenkinsCapture.getLatestBuildNumber();
+      // Get the latest build number for this specific job
+      const latestBuild = await this.jenkinsCapture.getLatestBuildNumber(job);
       
       if (!latestBuild) {
         throw new Error('No build number returned from Jenkins');
       }
       
-      logger.info(`✅ Build #${latestBuild} triggered successfully`);
-      return latestBuild;
+      logger.info(`✅ Build #${latestBuild} triggered successfully for job: ${job}`);
+      return { buildNumber: latestBuild, jobName: job };
     } catch (error) {
-      logger.error('❌ Jenkins trigger error:', error.response?.data || error.message);
-      throw new Error(`Failed to trigger Jenkins build: ${error.response?.data?.message || error.message}`);
+      logger.error(`❌ Jenkins trigger error for job ${job}:`, error.response?.data || error.message);
+      throw new Error(`Failed to trigger Jenkins build for ${job}: ${error.response?.data?.message || error.message}`);
     }
   }
 
@@ -492,8 +498,11 @@ class PortKafkaConsumer {
    * Generic handler that passes all Port properties to Jenkins
    * 
    * Example:
-   * Port action with properties: { branch: "main", tag: "v1.0", replicas: 3, enableDebug: true }
-   * Will send to Jenkins: { BRANCH: "main", TAG: "v1.0", REPLICAS: 3, ENABLEDEBUG: true, PORT_RUN_ID: "..." }
+   * Port action with properties: { job_name: "my-pipeline", branch: "main", tag: "v1.0" }
+   * Will send to Jenkins job "my-pipeline": { BRANCH: "main", TAG: "v1.0", PORT_RUN_ID: "..." }
+   * 
+   * Special properties:
+   * - job_name: (optional) Jenkins job to trigger. Falls back to JENKINS_JOB_NAME env var
    * 
    * Works with ANY properties - no specific parameters required.
    * Define whatever your Jenkins job needs in your Port action configuration.
@@ -502,6 +511,9 @@ class PortKafkaConsumer {
     const runId = message.context.runId;
     const props = message.properties;
     const entity = message.entity;
+    
+    // Extract job_name from properties (can be passed from Port action)
+    const jobName = props.job_name || props.jobName || props.jenkins_job || null;
 
     await this.addActionRunLog(runId, '🚀 Starting Jenkins build via Port...');
     await this.addActionRunLog(runId, `Action: ${message.action.identifier}`);
@@ -509,15 +521,18 @@ class PortKafkaConsumer {
 
     try {
       // Step 1: Trigger Jenkins build with all parameters from Port
-      await this.addActionRunLog(runId, 'Triggering Jenkins build...');
+      const targetJob = jobName || this.jenkinsCapture.jobName;
+      await this.addActionRunLog(runId, `Triggering Jenkins build for job: ${targetJob}...`);
       
       // Build parameters - pass ALL properties from Port to Jenkins
       // This makes it flexible for any action configuration in Port
       const buildParameters = {};
       
       // Convert all Port properties to Jenkins parameters
+      // Skip job_name variants as they're used for routing, not as build params
+      const skipKeys = ['job_name', 'jobName', 'jenkins_job'];
       for (const [key, value] of Object.entries(props)) {
-        if (value !== undefined && value !== null) {
+        if (value !== undefined && value !== null && !skipKeys.includes(key)) {
           // Convert property names to Jenkins convention (optional)
           // You can customize this transformation based on your needs:
           // - Keep original: buildParameters[key] = value;
@@ -532,11 +547,10 @@ class PortKafkaConsumer {
       
       logger.info('📋 Sending parameters to Jenkins:', JSON.stringify(buildParameters, null, 2));
       
-      const buildNumber = await this.triggerJenkinsBuild(buildParameters);
+      const { buildNumber, jobName: triggeredJob } = await this.triggerJenkinsBuild(buildParameters, jobName);
 
       const jenkinsUrl = this.jenkinsCapture.jenkinsUrl;
-      const jobName = this.jenkinsCapture.jobName;
-      const buildUrl = `${jenkinsUrl}/job/${jobName}/${buildNumber}`;
+      const buildUrl = `${jenkinsUrl}/job/${triggeredJob}/${buildNumber}`;
 
       await this.addActionRunLog(runId, `Jenkins build #${buildNumber} started`);
       
@@ -557,7 +571,7 @@ class PortKafkaConsumer {
       // Function to check and report stages
       const checkStages = async () => {
         try {
-          const allStages = await this.jenkinsCapture.getAllStages(buildNumber);
+          const allStages = await this.jenkinsCapture.getAllStages(buildNumber, triggeredJob);
           
           // Process all stages to find new ones
           for (const stage of allStages) {
@@ -589,7 +603,7 @@ class PortKafkaConsumer {
       const stageCheckInterval = setInterval(checkStages, 1000);
 
       try {
-        // Stream logs
+        // Stream logs (pass job name as 4th parameter after pollInterval)
         await this.jenkinsCapture.streamLogs(buildNumber, async (logChunk) => {
           logBuffer += logChunk;
           
@@ -598,7 +612,7 @@ class PortKafkaConsumer {
             await this.addActionRunLog(runId, logBuffer);
             logBuffer = '';
           }
-        });
+        }, 2000, triggeredJob);
 
         // Send any remaining logs
         if (logBuffer.length > 0) {
@@ -611,7 +625,7 @@ class PortKafkaConsumer {
         let buildComplete = false;
         while (!buildComplete) {
           await new Promise(resolve => setTimeout(resolve, 2000));
-          const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber);
+          const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber, triggeredJob);
           buildComplete = buildStatus.building === false;
         }
       } finally {
@@ -622,7 +636,7 @@ class PortKafkaConsumer {
       await this.addActionRunLog(runId, '─'.repeat(80));
 
       // Step 4: Get final build status
-      const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber);
+      const buildStatus = await this.jenkinsCapture.getBuildStatus(buildNumber, triggeredJob);
       const isSuccess = buildStatus.result === BUILD_STATUS.SUCCESS;
       const duration = (buildStatus.duration / 1000).toFixed(2);
 
@@ -702,6 +716,9 @@ class PortKafkaConsumer {
       logger.info('='.repeat(80) + '\n');
 
       // Start consuming
+      // Note: Messages are processed concurrently (fire-and-forget) to allow
+      // multiple Jenkins builds to run in parallel. Each action reports its
+      // own status back to Port independently.
       await this.consumer.run({
         eachMessage: async ({ topic, partition, message }) => {
           try {
@@ -709,13 +726,20 @@ class PortKafkaConsumer {
             const parsedMessage = JSON.parse(value);
 
             if (topic === this.actionsTopic) {
-              await this.processActionMessage(parsedMessage);
+              // Fire-and-forget: Don't await, allow concurrent processing
+              // Each action handler reports its own status to Port
+              this.processActionMessage(parsedMessage).catch(error => {
+                logger.error('❌ Error processing action message:', error);
+              });
             } else if (topic === this.changesTopic) {
-              await this.processChangeMessage(parsedMessage);
+              // Change messages can also be processed concurrently
+              this.processChangeMessage(parsedMessage).catch(error => {
+                logger.error('❌ Error processing change message:', error);
+              });
             }
 
           } catch (error) {
-            logger.error('❌ Error processing message:', error);
+            logger.error('❌ Error parsing message:', error);
             logger.error('Message value:', message.value.toString());
             // Don't throw - continue processing other messages
           }
